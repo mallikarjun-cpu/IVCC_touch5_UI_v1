@@ -49,7 +49,7 @@ void setup()
     Serial.setTimeout(10); // Prevent serial blocking
     delay(100); // Small delay for serial stabilization
 
-    Serial.println("Initializing board, code is on github");
+    Serial.println("Initializing board, code is on github, changed again 2");
     board = new Board();
     board->init();
 
