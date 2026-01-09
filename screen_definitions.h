@@ -10,6 +10,7 @@ extern lv_obj_t* screen_11;
 extern lv_obj_t* screen_2;
 extern lv_obj_t* screen_3;
 extern lv_obj_t* screen_12;
+extern lv_obj_t* screen_13;
 
 // Screen management enums and variables
 typedef enum {
@@ -17,7 +18,8 @@ typedef enum {
     SCREEN_BATTERY_DETECTED,   // Screen 2 - Battery detected/charging
     SCREEN_CHARGING_STARTED,   // Screen 3 - Charging started
     SCREEN_BATTERY_PROFILES,   // Screen 11 - Battery profiles
-    SCREEN_WIFI_CONFIG         // Screen 12 - WiFi configuration
+    SCREEN_WIFI_CONFIG,        // Screen 12 - WiFi configuration
+    SCREEN_CAN_DEBUG           // Screen 13 - CAN debug screen
 } screen_id_t;
 
 typedef enum {
@@ -46,6 +48,7 @@ void create_screen_11(void); //screen 11 - all battery profiles
 void create_screen_2(void); //screen 2 - battery detected, charge ready page
 void create_screen_3(void); //screen 3 - charging started
 void create_screen_12(void); //screen 12 - wifi configs
+void create_screen_13(void); //screen 13 - CAN debug screen
 
 // Screen management functions
 void initialize_all_screens(void);
@@ -57,6 +60,7 @@ void update_screen_based_on_state(void);
 // Table and UI update functions
 void update_table_values(void);
 void update_m2_state_display(void);
+void update_can_debug_display(uint32_t id, uint8_t* data, uint8_t length);
 
 // M2 State Management Functions
 void updateM2State(m2_state_t new_state);

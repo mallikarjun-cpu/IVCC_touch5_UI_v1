@@ -1,5 +1,28 @@
 #include "can_twai.h"
+#include "screen_definitions.h"
 #include <esp_log.h>
+
+// Forward declarations for global structs
+extern struct sensor_data {
+    float volt;
+    float curr;
+    int32_t temp1, temp2, temp3, temp4;
+} sensorData;
+
+extern struct time_from_m2 {
+    uint16_t year;
+    uint8_t month, date, day_of_week, hour, minute, second;
+} m2Time;
+
+// Big-endian conversion functions
+uint16_t bigEndianToUint16(uint8_t* data) {
+    return (data[0] << 8) | data[1];
+}
+
+int16_t bigEndianToInt16(uint8_t* data) {
+    uint16_t val = bigEndianToUint16(data);
+    return (int16_t)val;
+}
 
 // CAN configuration
 static twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
@@ -108,12 +131,54 @@ void can_task(void* parameter) {
     while (true) {
         // Check for received messages
         if (receive_can_frame(&rx_message)) {
+            // Update CAN debug screen with received frame
+            update_can_debug_display(rx_message.identifier, rx_message.data, rx_message.data_length_code);
+
             // Process received frame based on ID
             switch (rx_message.identifier) {
-                case SENSOR_FRAME_ID:
-                    // Handle sensor data
-                    Serial.println("Sensor data received");
+                case SENSOR_DATA_1_ID:
+                    // Process Voltage/Current data (0x101)
+                    if (rx_message.data_length_code >= 4) {
+                        uint16_t voltage_raw = bigEndianToUint16(&rx_message.data[0]);
+                        uint16_t current_raw = bigEndianToUint16(&rx_message.data[2]);
+
+                        sensorData.volt = voltage_raw / 100.0f;  // Convert to volts
+                        sensorData.curr = current_raw / 100.0f;  // Convert to amps
+
+                        Serial.printf("Sensor Data 1: Volt=%.2fV, Curr=%.2fA\n", sensorData.volt, sensorData.curr);
+                    }
                     break;
+
+                case SENSOR_DATA_2_ID:
+                    // Process Temperature data (0x102)
+                    if (rx_message.data_length_code >= 8) {
+                        sensorData.temp1 = (int32_t)bigEndianToInt16(&rx_message.data[0]);
+                        sensorData.temp2 = (int32_t)bigEndianToInt16(&rx_message.data[2]);
+                        sensorData.temp3 = (int32_t)bigEndianToInt16(&rx_message.data[4]);
+                        sensorData.temp4 = (int32_t)bigEndianToInt16(&rx_message.data[6]);
+
+                        Serial.printf("Sensor Data 2: Temp1=%d, Temp2=%d, Temp3=%d, Temp4=%d\n",
+                                    sensorData.temp1, sensorData.temp2, sensorData.temp3, sensorData.temp4);
+                    }
+                    break;
+
+                case SENSOR_DATA_3_ID:
+                    // Process RTC Date/Time data (0x103)
+                    if (rx_message.data_length_code >= 7) {
+                        m2Time.year = bigEndianToUint16(&rx_message.data[0]);
+                        m2Time.month = rx_message.data[2];
+                        m2Time.date = rx_message.data[3];
+                        m2Time.day_of_week = rx_message.data[4];
+                        m2Time.hour = rx_message.data[5];
+                        m2Time.minute = rx_message.data[6];
+                        m2Time.second = rx_message.data[7];
+
+                        Serial.printf("Sensor Data 3: %04d-%02d-%02d %02d:%02d:%02d (Day %d)\n",
+                                    m2Time.year, m2Time.month, m2Time.date,
+                                    m2Time.hour, m2Time.minute, m2Time.second, m2Time.day_of_week);
+                    }
+                    break;
+
                 default:
                     Serial.printf("Unknown CAN ID: 0x%03X\n", rx_message.identifier);
                     break;

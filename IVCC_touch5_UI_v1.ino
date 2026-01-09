@@ -22,8 +22,22 @@ extern bool battery_detected;
 struct sensor_data {
     float volt = -3.0f;
     float curr = -3.0f;
-    uint temp1 = 0;
+    int32_t temp1 = 0;
+    int32_t temp2 = 0;
+    int32_t temp3 = 0;
+    int32_t temp4 = 0;
 } sensorData;
+
+// Time data from M2 struct
+struct time_from_m2 {
+    uint16_t year = 2025;
+    uint8_t month = 1;
+    uint8_t date = 1;
+    uint8_t day_of_week = 1; // 1=Sunday
+    uint8_t hour = 0;
+    uint8_t minute = 0;
+    uint8_t second = 0;
+} m2Time;
 
 // Global instances definitions
 ScreenLogger screenLogger;
@@ -60,7 +74,7 @@ void setup()
 /*
 #if ESP_PANEL_DRIVERS_BUS_ENABLE_RGB && CONFIG_IDF_TARGET_ESP32S3
     auto lcd_bus = lcd->getBus();
-    
+
     // * As the anti-tearing feature typically consumes more PSRAM bandwidth, for the ESP32-S3, we need to utilize the
     // * "bounce buffer" functionality to enhance the RGB data bandwidth.
     // * This feature will consume `bounce_buffer_size * bytes_per_pixel * 2` of SRAM memory.

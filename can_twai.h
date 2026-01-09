@@ -9,8 +9,20 @@
 #define CAN_RX_PIN      GPIO_NUM_16  // ESP32-S3 CAN RX pin
 
 // CAN Frame IDs
-#define STARTUP_FRAME_ID    0x901
-#define SENSOR_FRAME_ID     0x100  // Example sensor frame ID
+#define STARTUP_FRAME_ID        0x901
+#define HANDSHAKE_FRAME_ID      0x100  // Handshake/Heartbeat
+#define SENSOR_DATA_1_ID        0x101  // Voltage/Current
+#define SENSOR_DATA_2_ID        0x102  // Temperature Channels
+#define SENSOR_DATA_3_ID        0x103  // RTC Date/Time
+
+// CAN Node IDs
+#define M1_NODE_ID              0x01    // ESP32 Touch LCD
+#define M2_NODE_ID              0x02    // STM32 Sensor Node
+
+// CAN Message Types
+#define MSG_HANDSHAKE_REQ       0x00
+#define MSG_HANDSHAKE_ACK       0x01
+#define MSG_HEARTBEAT           0x02
 
 // Function declarations
 bool init_can_twai(void);

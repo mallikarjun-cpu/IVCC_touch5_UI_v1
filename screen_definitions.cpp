@@ -40,6 +40,7 @@ lv_obj_t* screen_2 = nullptr;
 lv_obj_t* screen_3 = nullptr;
 lv_obj_t* screen_11 = nullptr;
 lv_obj_t* screen_12 = nullptr;
+lv_obj_t* screen_13 = nullptr;
 
 // Shared UI objects (reused between screens)
 static lv_obj_t* status_label = nullptr;
@@ -83,6 +84,12 @@ static lv_obj_t* screen11_back_btn = nullptr;
 
 // screen 12 connection status label
 static lv_obj_t* screen12_connection_status = nullptr;
+
+// screen 13 CAN frame display
+static lv_obj_t* screen13_can_frame_label = nullptr;
+#define CAN_DEBUG_MAX_LINES 5
+static char can_debug_lines[CAN_DEBUG_MAX_LINES][200];
+static int can_debug_current_line = 0;
 
 // ============================================================================
 // Screen Management Globals
@@ -248,6 +255,7 @@ void initialize_all_screens() {
     create_screen_3();   // Charging started screen
     create_screen_11();  // Battery profiles screen
     create_screen_12();  // WiFi config screen
+    create_screen_13();  // CAN debug screen
 
     // Start with home screen
     switch_to_screen(SCREEN_HOME);
@@ -275,6 +283,9 @@ void switch_to_screen(screen_id_t screen_id) {
             break;
         case SCREEN_WIFI_CONFIG:
             target_screen = screen_12;
+            break;
+        case SCREEN_CAN_DEBUG:
+            target_screen = screen_13;
             break;
         default:
             Serial.printf("[SCREEN] ERROR: Invalid screen ID %d\n", screen_id);
@@ -375,6 +386,10 @@ screen_id_t determine_screen_from_state() {
     }
     if (current_app_state == STATE_BATTERY_PROFILES) {
         return SCREEN_BATTERY_PROFILES;
+    }
+    // Don't switch away from CAN debug screen based on voltage
+    if (current_screen_id == SCREEN_CAN_DEBUG) {
+        return SCREEN_CAN_DEBUG;
     }
     if (battery_detected && sensorData.volt >= 9.0f) {
         return SCREEN_BATTERY_DETECTED;
@@ -548,9 +563,10 @@ void update_table_values() {
         lv_table_set_cell_value(data_table, 1, 1,
             String(sensorData.curr, 2).c_str());
 
-        // Update temperature (column 2)
+        // Update temperature (column 2) - temp1 from CAN data (0.01°C resolution)
+        float temp1_celsius = sensorData.temp1 / 100.0f;
         lv_table_set_cell_value(data_table, 1, 2,
-            String(sensorData.temp1).c_str());
+            String(temp1_celsius, 1).c_str());
 
         // Update frequency (column 3) - placeholder for now
         lv_table_set_cell_value(data_table, 1, 3, "--");
@@ -642,6 +658,41 @@ void update_wifi_connection_status() {
     }
 }
 
+// Update CAN debug screen with received frame
+void update_can_debug_display(uint32_t id, uint8_t* data, uint8_t length) {
+    if (screen13_can_frame_label != nullptr && current_screen_id == SCREEN_CAN_DEBUG) {
+        lvgl_port_lock(-1);
+
+        // Format frame text
+        char frame_text[200];
+        sprintf(frame_text, "0x%03X : ", id);
+
+        // Add data bytes to the string
+        for (int i = 0; i < length && i < 8; i++) {
+            sprintf(frame_text + strlen(frame_text), "%02X ", data[i]);
+        }
+
+        // Update current line and move to next
+        strcpy(can_debug_lines[can_debug_current_line], frame_text);
+        can_debug_current_line = (can_debug_current_line + 1) % CAN_DEBUG_MAX_LINES;
+
+        // Build display text from all lines
+        char display_text[1200] = "";
+        for (int i = 0; i < CAN_DEBUG_MAX_LINES; i++) {
+            if (strlen(can_debug_lines[i]) > 0) {
+                if (strlen(display_text) > 0) {
+                    strcat(display_text, "\n");
+                }
+                strcat(display_text, can_debug_lines[i]);
+            }
+        }
+
+        lv_label_set_text(screen13_can_frame_label, display_text);
+
+        lvgl_port_unlock();
+    }
+}
+
 // ============================================================================
 // Event Handlers
 // ============================================================================
@@ -670,6 +721,16 @@ void screen1_wifi_event_handler(lv_event_t * e) {
     }
 }
 
+// Screen 1 CAN Debug button event handler
+void screen1_can_debug_btnhandler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        Serial.println("[SCREEN] Switching to CAN debug screen");
+        // Switch to CAN debug screen (no state change needed)
+        switch_to_screen(SCREEN_CAN_DEBUG);
+    }
+}
+
 void screen2_confirm_agree_event_handler(lv_event_t * e) {
     lv_event_code_t code = lv_event_get_code(e);
     if(code == LV_EVENT_CLICKED) {
@@ -677,7 +738,7 @@ void screen2_confirm_agree_event_handler(lv_event_t * e) {
 
         // Send CAN test frame with ID 0x100 (256 decimal)
         uint8_t test_data[8] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
-        if (send_can_frame(SENSOR_FRAME_ID, test_data, 8)) {
+        if (send_can_frame(HANDSHAKE_FRAME_ID, test_data, 8)) {
             Serial.println("[CAN] Battery confirmation frame sent successfully");
         } else {
             Serial.println("[CAN] Failed to send battery confirmation frame");
@@ -803,7 +864,7 @@ void screen11_confirm_agree_event_handler(lv_event_t * e) {
 
         // Send CAN test frame with ID 0x100 (256 decimal)
         uint8_t test_data[8] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
-        if (send_can_frame(SENSOR_FRAME_ID, test_data, 8)) {
+        if (send_can_frame(HANDSHAKE_FRAME_ID, test_data, 8)) {
             Serial.println("[CAN] Test frame sent successfully");
         } else {
             Serial.println("[CAN] Failed to send test frame");
@@ -983,8 +1044,21 @@ void create_screen_1()
     lv_obj_t* screen1_wifi_label = lv_label_create(screen1_wifi_btn);
     lv_label_set_text(screen1_wifi_label, "WiFi Config");
     lv_obj_set_style_text_font(screen1_wifi_label, &lv_font_montserrat_20, LV_PART_MAIN);
-    lv_obj_set_style_text_color(screen1_wifi_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+    lv_obj_set_style_text_color(screen1_wifi_label, lv_color_hex(0xFFFFA0), LV_PART_MAIN);  // White text
     lv_obj_center(screen1_wifi_label);
+
+    // CAN Debug button (next to WiFi button)
+    lv_obj_t* screen1_can_debug_btn = lv_btn_create(screen1_button_container);
+    lv_obj_set_size(screen1_can_debug_btn, 300, 80);
+    lv_obj_set_style_bg_color(screen1_can_debug_btn, lv_color_hex(0xFFA500), LV_PART_MAIN);  // Orange button
+    lv_obj_add_event_cb(screen1_can_debug_btn, screen1_can_debug_btnhandler, LV_EVENT_CLICKED, NULL);
+    lv_obj_clear_flag(screen1_can_debug_btn, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* screen1_can_debug_label = lv_label_create(screen1_can_debug_btn);
+    lv_label_set_text(screen1_can_debug_label, "CAN Debug");
+    lv_obj_set_style_text_font(screen1_can_debug_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen1_can_debug_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+    lv_obj_center(screen1_can_debug_label);
 
     // v4.50: Add M2 state status box (top-left corner) - Screen 1
     createM2StateBox(screen_1, "screen_1");
@@ -1426,4 +1500,68 @@ void create_screen_12(void) {
     // lv_scr_load(screen_12); // Removed - handled by screen manager
 
     Serial.println("[SCREEN] Screen 12 created successfully");
+}
+
+//screen 13 - CAN debug screen
+void create_screen_13(void) {
+    screen_13 = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen_13, lv_color_hex(0x90EE90), LV_PART_MAIN);  // Light green background
+    lv_obj_set_style_bg_opa(screen_13, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(screen_13, LV_OPA_COVER, LV_PART_MAIN);
+
+    // v4.09: Screen NOT scrollable (fixed layout)
+    lv_obj_set_scroll_dir(screen_13, LV_DIR_NONE);  // No scrolling
+
+    // Title
+    lv_obj_t *title = lv_label_create(screen_13);
+    lv_label_set_text(title, "CAN Debug");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+
+    // Status label
+    lv_obj_t *status_label = lv_label_create(screen_13);
+    lv_label_set_text(status_label, "Received CAN Frames");
+    lv_obj_set_style_text_color(status_label, lv_color_hex(0x000000), LV_PART_MAIN);  // Black for visibility
+    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(status_label, LV_ALIGN_TOP_MID, 0, 60);
+
+    // CAN frames display area (scrollable container)
+    lv_obj_t* can_frames_container = lv_obj_create(screen_13);
+    lv_obj_set_size(can_frames_container, 990, 340);
+    lv_obj_set_pos(can_frames_container, 12, 240);  // Below table, aligned with table X position
+    lv_obj_set_style_bg_color(can_frames_container, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_border_width(can_frames_container, 2, LV_PART_MAIN);
+    lv_obj_set_scroll_dir(can_frames_container, LV_DIR_VER);  // Vertical scroll
+
+    // CAN frame display label (will be updated dynamically)
+    screen13_can_frame_label = lv_label_create(can_frames_container);
+    lv_label_set_text(screen13_can_frame_label, "No CAN frames received yet...\nWaiting for CAN data...");
+    lv_obj_set_style_text_font(screen13_can_frame_label, &lv_font_montserrat_28, LV_PART_MAIN);  // Font 28 as requested
+    lv_obj_set_style_text_color(screen13_can_frame_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_align(screen13_can_frame_label, LV_ALIGN_TOP_LEFT, 10, 10);
+
+    // Initialize CAN debug lines
+    memset(can_debug_lines, 0, sizeof(can_debug_lines));
+    can_debug_current_line = 0;
+
+    // Back button (top right)
+    lv_obj_t *screen13_back_btn = lv_btn_create(screen_13);
+    lv_obj_set_size(screen13_back_btn, 100, 50);
+    lv_obj_align(screen13_back_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
+    lv_obj_set_style_bg_color(screen13_back_btn, lv_color_hex(0xFF4444), LV_PART_MAIN);  // Red back button
+    lv_obj_add_event_cb(screen13_back_btn, screen11_back_button_event_handler, LV_EVENT_CLICKED, NULL);  // Reuse existing back handler
+    lv_obj_t* back_label = lv_label_create(screen13_back_btn);
+    lv_label_set_text(back_label, "BACK");
+    lv_obj_set_style_text_font(back_label, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_color(back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_center(back_label);
+
+    // Add M2 state status box (same position as screen 1)
+    createM2StateBox(screen_13, "screen_13");
+
+    // Note: Screen loading is handled by switch_to_screen()
+    // lv_scr_load(screen_13); // Removed - handled by screen manager
+
+    Serial.println("[SCREEN] Screen 13 (CAN Debug) created successfully");
 }
