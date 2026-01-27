@@ -12,7 +12,7 @@
 extern struct sensor_data {
     float volt;
     float curr;
-    uint temp1;
+    int32_t temp1;
 } sensorData;
 
 // ============================================================================
@@ -38,6 +38,8 @@ static const int WIFI_MAX_ATTEMPTS = 20; // 20 attempts * 500ms = 10 seconds
 lv_obj_t* screen_1 = nullptr;
 lv_obj_t* screen_2 = nullptr;
 lv_obj_t* screen_3 = nullptr;
+lv_obj_t* screen_4 = nullptr;
+lv_obj_t* screen_5 = nullptr;
 lv_obj_t* screen_11 = nullptr;
 lv_obj_t* screen_12 = nullptr;
 lv_obj_t* screen_13 = nullptr;
@@ -102,6 +104,12 @@ app_state_t current_app_state = STATE_HOME;
 // State-based screen switching triggers
 bool battery_detected = false;
 bool wifi_config_requested = false;
+
+// ============================================================================
+// Charging Control Globals
+// ============================================================================
+static uint16_t current_frequency = RS485_FREQ_MIN;  // Current motor frequency in 0.01Hz units
+static unsigned long last_control_update = 0;         // Rate limiting for charging control
 
 // ============================================================================
 // M2 State Management Globals
@@ -252,7 +260,9 @@ void initialize_all_screens() {
 
     create_screen_1();   // Home screen
     create_screen_2();   // Battery detected screen
-    create_screen_3();   // Charging started screen
+    create_screen_3();   // Charging start screen
+    create_screen_4();   // CC mode screen
+    create_screen_5();   // CV mode screen
     create_screen_11();  // Battery profiles screen
     create_screen_12();  // WiFi config screen
     create_screen_13();  // CAN debug screen
@@ -277,6 +287,12 @@ void switch_to_screen(screen_id_t screen_id) {
             break;
         case SCREEN_CHARGING_STARTED:
             target_screen = screen_3;
+            break;
+        case SCREEN_CHARGING_CC:
+            target_screen = screen_4;
+            break;
+        case SCREEN_CHARGING_CV:
+            target_screen = screen_5;
             break;
         case SCREEN_BATTERY_PROFILES:
             target_screen = screen_11;
@@ -352,13 +368,133 @@ void switch_to_screen(screen_id_t screen_id) {
 // Forward declaration for WiFi status update function
 void update_wifi_connection_status();
 
+// ============================================================================
+// Charging Control Function
+// ============================================================================
+void update_charging_control() {
+    // Only run in charging states
+    if (current_app_state != STATE_CHARGING_START && 
+        current_app_state != STATE_CHARGING_CC && 
+        current_app_state != STATE_CHARGING_CV) {
+        return;
+    }
+    
+    // Check if battery profile is selected
+    if (selected_battery_profile == nullptr) {
+        return;
+    }
+    
+    // Rate limiting: update once per second
+    const unsigned long CONTROL_UPDATE_INTERVAL = 1000; // 1 second
+    if (millis() - last_control_update < CONTROL_UPDATE_INTERVAL) {
+        return;
+    }
+    last_control_update = millis();
+    
+    // Get target values from battery profile
+    float target_current = selected_battery_profile->getConstCurrent(); // Amps
+    float target_voltage = selected_battery_profile->getCutoffVoltage(); // Volts
+    
+    // Validate and convert sensor data (handle negative values)
+    // Clamp negative values to 0 to prevent unsigned wrap-around
+    float safe_actual_current = (sensorData.curr < 0.0f) ? 0.0f : sensorData.curr;
+    float safe_actual_voltage = (sensorData.volt < 0.0f) ? 0.0f : sensorData.volt;
+    
+    // Convert to 0.01 units (as required by RS485 functions)
+    uint16_t target_current_0_01A = (uint16_t)(target_current * 100);
+    uint16_t target_voltage_0_01V = (uint16_t)(target_voltage * 100);
+    uint16_t actual_current_0_01A = (uint16_t)(safe_actual_current * 100);
+    uint16_t actual_voltage_0_01V = (uint16_t)(safe_actual_voltage * 100);
+    
+    uint16_t new_frequency = current_frequency;
+    
+    // State-specific charging logic
+    if (current_app_state == STATE_CHARGING_START) {
+        // STATE_CHARGING_START: Wait until 1A current flows
+        // Use CC logic to increase RPM
+        new_frequency = rs485_CalcFrequencyFor_CC(
+            current_frequency, 
+            target_current_0_01A, 
+            actual_current_0_01A
+        );
+        
+        // Debug logging
+        int32_t current_error = (int32_t)actual_current_0_01A - (int32_t)target_current_0_01A;
+        Serial.printf("[CHARGING_START] Target: %.2fA, Actual: %.2fA, Error: %d (0.01A), Freq: %d -> %d (%.2f Hz -> %.2f Hz)\n",
+            target_current, safe_actual_current, current_error,
+            current_frequency, new_frequency,
+            current_frequency / 100.0f, new_frequency / 100.0f);
+        
+        // Send frequency command
+        rs485_sendFrequencyCommand(new_frequency);
+        current_frequency = new_frequency;
+        
+        // Check if current >= 1A, then transition to CC state
+        if (safe_actual_current >= 1.0f) {
+            Serial.println("[CHARGING] Current reached 1A, transitioning to CC mode");
+            current_app_state = STATE_CHARGING_CC;
+            // Screen switch will happen in determine_screen_from_state()
+        }
+    }
+    else if (current_app_state == STATE_CHARGING_CC) {
+        // STATE_CHARGING_CC: Constant Current mode until target voltage reached
+        new_frequency = rs485_CalcFrequencyFor_CC(
+            current_frequency, 
+            target_current_0_01A, 
+            actual_current_0_01A
+        );
+        
+        // Debug logging
+        int32_t current_error = (int32_t)actual_current_0_01A - (int32_t)target_current_0_01A;
+        Serial.printf("[CHARGING_CC] Target: %.2fA, Actual: %.2fA, Error: %d (0.01A), Freq: %d -> %d (%.2f Hz -> %.2f Hz)\n",
+            target_current, safe_actual_current, current_error,
+            current_frequency, new_frequency,
+            current_frequency / 100.0f, new_frequency / 100.0f);
+        
+        // Send frequency command
+        rs485_sendFrequencyCommand(new_frequency);
+        current_frequency = new_frequency;
+        
+        // Check if voltage >= target voltage, then transition to CV state
+        if (safe_actual_voltage >= target_voltage) {
+            Serial.println("[CHARGING] Voltage reached target, transitioning to CV mode");
+            current_app_state = STATE_CHARGING_CV;
+            // Screen switch will happen in determine_screen_from_state()
+        }
+    }
+    else if (current_app_state == STATE_CHARGING_CV) {
+        // STATE_CHARGING_CV: Constant Voltage mode
+        new_frequency = rs485_CalcFrequencyFor_CV(
+            current_frequency, 
+            target_voltage_0_01V, 
+            actual_voltage_0_01V
+        );
+        
+        // Debug logging
+        int32_t voltage_error = (int32_t)actual_voltage_0_01V - (int32_t)target_voltage_0_01V;
+        Serial.printf("[CHARGING_CV] Target: %.2fV, Actual: %.2fV, Error: %d (0.01V), Freq: %d -> %d (%.2f Hz -> %.2f Hz)\n",
+            target_voltage, safe_actual_voltage, voltage_error,
+            current_frequency, new_frequency,
+            current_frequency / 100.0f, new_frequency / 100.0f);
+        
+        // Send frequency command
+        rs485_sendFrequencyCommand(new_frequency);
+        current_frequency = new_frequency;
+        
+        // Termination condition will be added later as requested
+    }
+}
+
 // Update current screen content (screen-specific updates)
 void update_current_screen() {
     // WiFi connection status updates only when on WiFi config screen
     if (current_screen_id == SCREEN_WIFI_CONFIG) {
         update_wifi_connection_status();
     }
-
+    
+    // Charging control (runs only in charging states, once per second)
+    update_charging_control();
+    
     // Update battery details on screen 3
     if (current_screen_id == SCREEN_CHARGING_STARTED && screen3_battery_details_label != nullptr) {
         if (selected_battery_profile != nullptr) {
@@ -381,8 +517,14 @@ screen_id_t determine_screen_from_state() {
     if (wifi_config_requested) {
         return SCREEN_WIFI_CONFIG;
     }
-    if (current_app_state == STATE_CHARGING_STARTED) {
+    if (current_app_state == STATE_CHARGING_START || current_app_state == STATE_CHARGING_STARTED) {
         return SCREEN_CHARGING_STARTED;
+    }
+    if (current_app_state == STATE_CHARGING_CC) {
+        return SCREEN_CHARGING_CC;
+    }
+    if (current_app_state == STATE_CHARGING_CV) {
+        return SCREEN_CHARGING_CV;
     }
     if (current_app_state == STATE_BATTERY_PROFILES) {
         return SCREEN_BATTERY_PROFILES;
@@ -568,8 +710,10 @@ void update_table_values() {
         lv_table_set_cell_value(data_table, 1, 2,
             String(temp1_celsius, 1).c_str());
 
-        // Update frequency (column 3) - placeholder for now
-        lv_table_set_cell_value(data_table, 1, 3, "--");
+        // Update frequency (column 3) - show current RPM
+        float freq_hz = current_frequency / 100.0f;
+        float rpm = VFD_FREQ_TO_RPM(freq_hz);
+        lv_table_set_cell_value(data_table, 1, 3, String((int)rpm).c_str());
 
         // Update entry counter (column 4)
         static int entry_counter = 0;
@@ -794,8 +938,12 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         rs485_sendStartCommand();
         Serial.println("Start cmd sent to vfd, going to scrn3 now.");
 
-        // Switch to charging started state
-        current_app_state = STATE_CHARGING_STARTED;
+        // Initialize charging control variables
+        current_frequency = RS485_FREQ_MIN;  // Start at minimum frequency
+        last_control_update = 0;  // Reset rate limiting
+
+        // Switch to charging start state
+        current_app_state = STATE_CHARGING_START;
         switch_to_screen(SCREEN_CHARGING_STARTED);
     }
 }
@@ -1237,9 +1385,9 @@ void create_screen_3(void) {
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
 
-    // Status label (charging in progress)
+    // Status label (charging start - waiting for 1A)
     lv_obj_t *status_label_3 = lv_label_create(screen_3);
-    lv_label_set_text(status_label_3, "Charging in progress...");
+    lv_label_set_text(status_label_3, "Starting charge... Waiting for 1A");
     lv_obj_set_style_text_color(status_label_3, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
     lv_obj_set_style_text_font(status_label_3, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(status_label_3, LV_ALIGN_TOP_MID, 0, 60);
@@ -1263,6 +1411,94 @@ void create_screen_3(void) {
     // Note: Screen loading is handled by switch_to_screen()
     // lv_scr_load(screen_3); // Removed - handled by screen manager
     Serial.println("[SCREEN] Screen 3 created successfully");
+}
+
+//screen 4 - Constant Current (CC) mode
+void create_screen_4(void) {
+    screen_4 = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen_4, lv_color_hex(0x90EE90), LV_PART_MAIN);  // Light green background
+    lv_obj_set_style_bg_opa(screen_4, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(screen_4, LV_OPA_COVER, LV_PART_MAIN);
+
+    // Screen NOT scrollable (fixed layout)
+    lv_obj_set_scroll_dir(screen_4, LV_DIR_NONE);  // No scrolling
+
+    // Title
+    lv_obj_t *title = lv_label_create(screen_4);
+    lv_label_set_text(title, "Constant Current Mode");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+
+    // Status label (CC charging in progress)
+    lv_obj_t *status_label_4 = lv_label_create(screen_4);
+    lv_label_set_text(status_label_4, "CC Charging in progress...");
+    lv_obj_set_style_text_color(status_label_4, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
+    lv_obj_set_style_text_font(status_label_4, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(status_label_4, LV_ALIGN_TOP_MID, 0, 60);
+
+    // Move shared data table to screen_4
+    if (data_table != nullptr) {
+        lv_obj_set_parent(data_table, screen_4);
+        lv_obj_set_pos(data_table, 12, 110);
+    }
+
+    // Battery profile details label (below table)
+    lv_obj_t* screen4_battery_details_label = lv_label_create(screen_4);
+    lv_label_set_text(screen4_battery_details_label, "Selected Battery: --");
+    lv_obj_set_style_text_color(screen4_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen4_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_align(screen4_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 350);  // Below table
+
+    // Add M2 state status box - screen 4
+    createM2StateBox(screen_4, "screen_4");
+
+    // Note: Screen loading is handled by switch_to_screen()
+    Serial.println("[SCREEN] Screen 4 (CC Mode) created successfully");
+}
+
+//screen 5 - Constant Voltage (CV) mode
+void create_screen_5(void) {
+    screen_5 = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen_5, lv_color_hex(0x90EE90), LV_PART_MAIN);  // Light green background
+    lv_obj_set_style_bg_opa(screen_5, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(screen_5, LV_OPA_COVER, LV_PART_MAIN);
+
+    // Screen NOT scrollable (fixed layout)
+    lv_obj_set_scroll_dir(screen_5, LV_DIR_NONE);  // No scrolling
+
+    // Title
+    lv_obj_t *title = lv_label_create(screen_5);
+    lv_label_set_text(title, "Constant Voltage Mode");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+
+    // Status label (CV charging in progress)
+    lv_obj_t *status_label_5 = lv_label_create(screen_5);
+    lv_label_set_text(status_label_5, "CV Charging in progress...");
+    lv_obj_set_style_text_color(status_label_5, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
+    lv_obj_set_style_text_font(status_label_5, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(status_label_5, LV_ALIGN_TOP_MID, 0, 60);
+
+    // Move shared data table to screen_5
+    if (data_table != nullptr) {
+        lv_obj_set_parent(data_table, screen_5);
+        lv_obj_set_pos(data_table, 12, 110);
+    }
+
+    // Battery profile details label (below table)
+    lv_obj_t* screen5_battery_details_label = lv_label_create(screen_5);
+    lv_label_set_text(screen5_battery_details_label, "Selected Battery: --");
+    lv_obj_set_style_text_color(screen5_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen5_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_align(screen5_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 350);  // Below table
+
+    // Add M2 state status box - screen 5
+    createM2StateBox(screen_5, "screen_5");
+
+    // Note: Screen loading is handled by switch_to_screen()
+    Serial.println("[SCREEN] Screen 5 (CV Mode) created successfully");
 }
 
 
