@@ -15,6 +15,17 @@ extern struct sensor_data {
     int32_t temp1;
 } sensorData;
 
+// External time data from M2
+extern struct time_from_m2 {
+    uint16_t year;
+    uint8_t month;
+    uint8_t date;
+    uint8_t day_of_week;  // Note: 1=Sunday in M2, will convert to 1=Monday for display
+    uint8_t hour;
+    uint8_t minute;
+    uint8_t second;
+} m2Time;
+
 // ============================================================================
 // WiFi Configuration (hardcoded for testing)
 // ============================================================================
@@ -45,6 +56,7 @@ lv_obj_t* screen_7 = nullptr;
 lv_obj_t* screen_11 = nullptr;
 lv_obj_t* screen_12 = nullptr;
 lv_obj_t* screen_13 = nullptr;
+lv_obj_t* screen_16 = nullptr;
 
 // Shared UI objects (reused between screens)
 static lv_obj_t* status_label = nullptr;
@@ -94,6 +106,9 @@ static lv_obj_t* screen13_can_frame_label = nullptr;
 #define CAN_DEBUG_MAX_LINES 5
 static char can_debug_lines[CAN_DEBUG_MAX_LINES][200];
 static int can_debug_current_line = 0;
+
+// screen 16 time display
+static lv_obj_t* screen16_time_label = nullptr;
 
 // ============================================================================
 // Screen Management Globals
@@ -279,6 +294,7 @@ void initialize_all_screens() {
     create_screen_11();  // Battery profiles screen
     create_screen_12();  // WiFi config screen
     create_screen_13();  // CAN debug screen
+    create_screen_16();  // Time debug screen
 
     // Start with home screen
     switch_to_screen(SCREEN_HOME);
@@ -321,6 +337,9 @@ void switch_to_screen(screen_id_t screen_id) {
             break;
         case SCREEN_CAN_DEBUG:
             target_screen = screen_13;
+            break;
+        case SCREEN_TIME_DEBUG:
+            target_screen = screen_16;
             break;
         default:
             Serial.printf("[SCREEN] ERROR: Invalid screen ID %d\n", screen_id);
@@ -562,6 +581,11 @@ void update_current_screen() {
         update_wifi_connection_status();
     }
     
+    // Time debug display updates only when on time debug screen
+    if (current_screen_id == SCREEN_TIME_DEBUG) {
+        update_time_debug_display();
+    }
+    
     // Charging control (runs only in charging states, once per second)
     update_charging_control();
     
@@ -608,6 +632,10 @@ screen_id_t determine_screen_from_state() {
     // Don't switch away from CAN debug screen based on voltage
     if (current_screen_id == SCREEN_CAN_DEBUG) {
         return SCREEN_CAN_DEBUG;
+    }
+    // Don't switch away from time debug screen based on voltage
+    if (current_screen_id == SCREEN_TIME_DEBUG) {
+        return SCREEN_TIME_DEBUG;
     }
     if (battery_detected && sensorData.volt >= 9.0f) {
         return SCREEN_BATTERY_DETECTED;
@@ -913,6 +941,37 @@ void update_can_debug_display(uint32_t id, uint8_t* data, uint8_t length) {
     }
 }
 
+// Update time debug screen with M2 RTC time
+void update_time_debug_display() {
+    if (screen16_time_label != nullptr && current_screen_id == SCREEN_TIME_DEBUG) {
+        lvgl_port_lock(-1);
+
+        // Convert day_of_week from M2 format (1=Sunday) to display format (1=Monday)
+        // M2: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday
+        // Display: 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday
+        uint8_t display_day = m2Time.day_of_week;
+        if (display_day == 1) {
+            display_day = 7;  // Sunday becomes 7
+        } else {
+            display_day = display_day - 1;  // Monday=2 becomes 1, etc.
+        }
+
+        // Day names for display (1=Monday)
+        const char* day_names[] = {"", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+
+        // Format time string: 24hr format, day name, date
+        char time_text[200];
+        sprintf(time_text, "Time: %02d:%02d:%02d\nDay: %d (%s)\nDate: %04d-%02d-%02d",
+            m2Time.hour, m2Time.minute, m2Time.second,
+            display_day, (display_day >= 1 && display_day <= 7) ? day_names[display_day] : "Unknown",
+            m2Time.year, m2Time.month, m2Time.date);
+
+        lv_label_set_text(screen16_time_label, time_text);
+
+        lvgl_port_unlock();
+    }
+}
+
 // ============================================================================
 // Event Handlers
 // ============================================================================
@@ -948,6 +1007,16 @@ void screen1_can_debug_btnhandler(lv_event_t * e) {
         Serial.println("[SCREEN] Switching to CAN debug screen");
         // Switch to CAN debug screen (no state change needed)
         switch_to_screen(SCREEN_CAN_DEBUG);
+    }
+}
+
+// Screen 1 Time Debug button event handler
+void screen1_time_debug_btnhandler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        Serial.println("[SCREEN] Switching to time debug screen");
+        // Switch to time debug screen (no state change needed)
+        switch_to_screen(SCREEN_TIME_DEBUG);
     }
 }
 
@@ -1334,6 +1403,19 @@ void create_screen_1()
     lv_obj_set_style_text_font(screen1_can_debug_label, &lv_font_montserrat_20, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen1_can_debug_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen1_can_debug_label);
+
+    // Time Debug button (next to CAN Debug button)
+    lv_obj_t* screen1_time_debug_btn = lv_btn_create(screen1_button_container);
+    lv_obj_set_size(screen1_time_debug_btn, 300, 80);
+    lv_obj_set_style_bg_color(screen1_time_debug_btn, lv_color_hex(0x9370DB), LV_PART_MAIN);  // Medium purple button
+    lv_obj_add_event_cb(screen1_time_debug_btn, screen1_time_debug_btnhandler, LV_EVENT_CLICKED, NULL);
+    lv_obj_clear_flag(screen1_time_debug_btn, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* screen1_time_debug_label = lv_label_create(screen1_time_debug_btn);
+    lv_label_set_text(screen1_time_debug_label, "Time Debug");
+    lv_obj_set_style_text_font(screen1_time_debug_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen1_time_debug_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+    lv_obj_center(screen1_time_debug_label);
 
     // v4.50: Add M2 state status box (top-left corner) - Screen 1
     createM2StateBox(screen_1, "screen_1");
@@ -2066,4 +2148,56 @@ void create_screen_13(void) {
     // lv_scr_load(screen_13); // Removed - handled by screen manager
 
     Serial.println("[SCREEN] Screen 13 (CAN Debug) created successfully");
+}
+
+//screen 16 - Time debug screen
+void create_screen_16(void) {
+    screen_16 = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen_16, lv_color_hex(0xADD8E6), LV_PART_MAIN);  // Light blue background
+    lv_obj_set_style_bg_opa(screen_16, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(screen_16, LV_OPA_COVER, LV_PART_MAIN);
+
+    // Screen NOT scrollable (fixed layout)
+    lv_obj_set_scroll_dir(screen_16, LV_DIR_NONE);  // No scrolling
+
+    // Title
+    lv_obj_t *title = lv_label_create(screen_16);
+    lv_label_set_text(title, "Time Debug");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+
+    // Status label
+    lv_obj_t *status_label = lv_label_create(screen_16);
+    lv_label_set_text(status_label, "M2 RTC Time Display");
+    lv_obj_set_style_text_color(status_label, lv_color_hex(0x000000), LV_PART_MAIN);  // Black for visibility
+    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(status_label, LV_ALIGN_TOP_MID, 0, 60);
+
+    // Time display label (will be updated dynamically)
+    screen16_time_label = lv_label_create(screen_16);
+    lv_label_set_text(screen16_time_label, "Waiting for time data from M2...");
+    lv_obj_set_style_text_font(screen16_time_label, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen16_time_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_align(screen16_time_label, LV_ALIGN_CENTER, 0, 0);
+
+    // Back button (top right)
+    lv_obj_t *screen16_back_btn = lv_btn_create(screen_16);
+    lv_obj_set_size(screen16_back_btn, 100, 50);
+    lv_obj_align(screen16_back_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
+    lv_obj_set_style_bg_color(screen16_back_btn, lv_color_hex(0xFF4444), LV_PART_MAIN);  // Red back button
+    lv_obj_add_event_cb(screen16_back_btn, screen11_back_button_event_handler, LV_EVENT_CLICKED, NULL);  // Reuse existing back handler
+    lv_obj_t* back_label = lv_label_create(screen16_back_btn);
+    lv_label_set_text(back_label, "BACK");
+    lv_obj_set_style_text_font(back_label, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_color(back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_center(back_label);
+
+    // Add M2 state status box (same position as screen 1)
+    createM2StateBox(screen_16, "screen_16");
+
+    // Note: Screen loading is handled by switch_to_screen()
+    // lv_scr_load(screen_16); // Removed - handled by screen manager
+
+    Serial.println("[SCREEN] Screen 16 (Time Debug) created successfully");
 }
