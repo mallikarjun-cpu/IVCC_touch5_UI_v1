@@ -40,6 +40,8 @@ lv_obj_t* screen_2 = nullptr;
 lv_obj_t* screen_3 = nullptr;
 lv_obj_t* screen_4 = nullptr;
 lv_obj_t* screen_5 = nullptr;
+lv_obj_t* screen_6 = nullptr;
+lv_obj_t* screen_7 = nullptr;
 lv_obj_t* screen_11 = nullptr;
 lv_obj_t* screen_12 = nullptr;
 lv_obj_t* screen_13 = nullptr;
@@ -100,6 +102,7 @@ static int can_debug_current_line = 0;
 // Current screen and state tracking
 screen_id_t current_screen_id = SCREEN_HOME;
 app_state_t current_app_state = STATE_HOME;
+charge_stop_reason_t charge_stop_reason = CHARGE_STOP_NONE;
 
 // State-based screen switching triggers
 bool battery_detected = false;
@@ -108,8 +111,11 @@ bool wifi_config_requested = false;
 // ============================================================================
 // Charging Control Globals
 // ============================================================================
-static uint16_t current_frequency = RS485_FREQ_MIN;  // Current motor frequency in 0.01Hz units
+static uint16_t current_frequency = 0;                // Current motor frequency in 0.01Hz units (0 = stopped)
 static unsigned long last_control_update = 0;         // Rate limiting for charging control
+static unsigned long cc_state_start_time = 0;         // Time when CC state started (millis)
+static unsigned long cv_state_start_time = 0;         // Time when CV state started (millis)
+static unsigned long cc_state_duration = 0;           // Duration spent in CC state (millis)
 
 // ============================================================================
 // M2 State Management Globals
@@ -250,6 +256,11 @@ void updateM2ConnectionStatus(bool connected) {
 void displayAllBatteryProfiles(lv_obj_t* container);
 void displayMatchingBatteryProfiles(float detectedVoltage, lv_obj_t* container);
 
+// Forward declaration for emergency stop handler
+void emergency_stop_event_handler(lv_event_t * e);
+// Forward declaration for home button handler
+void home_button_event_handler(lv_event_t * e);
+
 // ============================================================================
 // Screen Management Functions
 // ============================================================================
@@ -263,6 +274,8 @@ void initialize_all_screens() {
     create_screen_3();   // Charging start screen
     create_screen_4();   // CC mode screen
     create_screen_5();   // CV mode screen
+    create_screen_6();   // Charging complete screen
+    create_screen_7();   // Emergency stop screen
     create_screen_11();  // Battery profiles screen
     create_screen_12();  // WiFi config screen
     create_screen_13();  // CAN debug screen
@@ -293,6 +306,12 @@ void switch_to_screen(screen_id_t screen_id) {
             break;
         case SCREEN_CHARGING_CV:
             target_screen = screen_5;
+            break;
+        case SCREEN_CHARGING_COMPLETE:
+            target_screen = screen_6;
+            break;
+        case SCREEN_EMERGENCY_STOP:
+            target_screen = screen_7;
             break;
         case SCREEN_BATTERY_PROFILES:
             target_screen = screen_11;
@@ -433,6 +452,8 @@ void update_charging_control() {
         if (safe_actual_current >= 1.0f) {
             Serial.println("[CHARGING] Current reached 1A, transitioning to CC mode");
             current_app_state = STATE_CHARGING_CC;
+            cc_state_start_time = millis();  // Record CC state start time
+            Serial.println("[CHARGING] CC state timing started");
             // Screen switch will happen in determine_screen_from_state()
         }
     }
@@ -458,7 +479,15 @@ void update_charging_control() {
         // Check if voltage >= target voltage, then transition to CV state
         if (safe_actual_voltage >= target_voltage) {
             Serial.println("[CHARGING] Voltage reached target, transitioning to CV mode");
+            // Calculate CC state duration before transitioning
+            if (cc_state_start_time > 0) {
+                cc_state_duration = millis() - cc_state_start_time;
+                Serial.printf("[CHARGING] CC state duration: %lu ms (%.2f minutes)\n", 
+                    cc_state_duration, cc_state_duration / 60000.0f);
+            }
             current_app_state = STATE_CHARGING_CV;
+            cv_state_start_time = millis();  // Record CV state start time
+            Serial.println("[CHARGING] CV state timing started");
             // Screen switch will happen in determine_screen_from_state()
         }
     }
@@ -481,7 +510,48 @@ void update_charging_control() {
         rs485_sendFrequencyCommand(new_frequency);
         current_frequency = new_frequency;
         
-        // Termination condition will be added later as requested
+        // Termination condition: Check if charging is complete
+        // Complete if: 30 minutes in CV mode OR 33% of CC state time has elapsed
+        unsigned long current_time = millis();
+        unsigned long cv_duration = 0;
+        if (cv_state_start_time > 0) {
+            cv_duration = current_time - cv_state_start_time;
+        }
+        
+        const unsigned long CV_COMPLETE_TIME_MS = 30 * 60 * 1000;  // 30 minutes in milliseconds
+        bool cv_time_complete = (cv_duration >= CV_COMPLETE_TIME_MS);
+        
+        // 33% of CC state time (if CC duration was recorded)
+        bool cc_time_complete = false;
+        if (cc_state_duration > 0) {
+            unsigned long cc_33_percent_time = cc_state_duration / 3;  // 33% = 1/3
+            cc_time_complete = (cv_duration >= cc_33_percent_time);
+        }
+        
+        if (cv_time_complete || cc_time_complete) {
+            Serial.println("[CHARGING] Charging complete condition met!");
+            if (cv_time_complete) {
+                Serial.printf("[CHARGING] CV mode duration: %lu ms (%.2f minutes) >= 30 minutes\n",
+                    cv_duration, cv_duration / 60000.0f);
+            }
+            if (cc_time_complete && cc_state_duration > 0) {
+                Serial.printf("[CHARGING] CV duration (%lu ms) >= 33%% of CC duration (%lu ms)\n",
+                    cv_duration, cc_state_duration);
+            }
+            
+            // Send stop command to VFD
+            rs485_sendStopCommand();
+            Serial.println("[CHARGING] Stop command sent to VFD");
+            
+            // Reset frequency to 0
+            current_frequency = 0;
+            Serial.println("[CHARGING] Frequency reset to 0");
+            
+            // Set stop reason and transition to complete state
+            charge_stop_reason = CHARGE_STOP_COMPLETE;
+            current_app_state = STATE_CHARGING_COMPLETE;
+            switch_to_screen(SCREEN_CHARGING_COMPLETE);
+        }
     }
 }
 
@@ -517,7 +587,7 @@ screen_id_t determine_screen_from_state() {
     if (wifi_config_requested) {
         return SCREEN_WIFI_CONFIG;
     }
-    if (current_app_state == STATE_CHARGING_START || current_app_state == STATE_CHARGING_STARTED) {
+    if (current_app_state == STATE_CHARGING_START) {
         return SCREEN_CHARGING_STARTED;
     }
     if (current_app_state == STATE_CHARGING_CC) {
@@ -525,6 +595,12 @@ screen_id_t determine_screen_from_state() {
     }
     if (current_app_state == STATE_CHARGING_CV) {
         return SCREEN_CHARGING_CV;
+    }
+    if (current_app_state == STATE_CHARGING_COMPLETE) {
+        return SCREEN_CHARGING_COMPLETE;
+    }
+    if (current_app_state == STATE_EMERGENCY_STOP) {
+        return SCREEN_EMERGENCY_STOP;
     }
     if (current_app_state == STATE_BATTERY_PROFILES) {
         return SCREEN_BATTERY_PROFILES;
@@ -939,8 +1015,11 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         Serial.println("Start cmd sent to vfd, going to scrn3 now.");
 
         // Initialize charging control variables
-        current_frequency = RS485_FREQ_MIN;  // Start at minimum frequency
+        current_frequency = 0;  // Start at 0 (stopped)
         last_control_update = 0;  // Reset rate limiting
+        cc_state_start_time = 0;  // Reset CC timing
+        cv_state_start_time = 0;  // Reset CV timing
+        cc_state_duration = 0;    // Reset CC duration
 
         // Switch to charging start state
         current_app_state = STATE_CHARGING_START;
@@ -1076,6 +1155,54 @@ void screen12_back_button_event_handler(lv_event_t * e) {
         current_app_state = STATE_HOME;
         wifi_config_requested = false;
         switch_to_screen(SCREEN_HOME);
+    }
+}
+
+// Emergency stop event handler (used on screens 3, 4, 5)
+void emergency_stop_event_handler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        Serial.println("[EMERGENCY] Emergency stop button pressed!");
+        
+        // Send RS485 stop command to VFD
+        rs485_sendStopCommand();
+        Serial.println("[EMERGENCY] Stop command sent to VFD");
+        
+        // Reset frequency to 0
+        current_frequency = 0;
+        Serial.println("[EMERGENCY] Frequency reset to 0");
+        
+        // Set stop reason
+        charge_stop_reason = CHARGE_STOP_EMERGENCY;
+        
+        // Switch to emergency stop state and screen
+        current_app_state = STATE_EMERGENCY_STOP;
+        switch_to_screen(SCREEN_EMERGENCY_STOP);
+    }
+}
+
+// Home button event handler (used on screens 6, 7)
+void home_button_event_handler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        Serial.println("[HOME] Home button pressed");
+        
+        // Reset stop reason
+        charge_stop_reason = CHARGE_STOP_NONE;
+        
+        // Check if battery is still connected
+        if (battery_detected && sensorData.volt >= 9.0f) {
+            // Battery still connected - go to battery detected screen
+            Serial.println("[HOME] Battery still connected, switching to battery detected screen");
+            current_app_state = STATE_BATTERY_DETECTED;
+            switch_to_screen(SCREEN_BATTERY_DETECTED);
+        } else {
+            // Battery removed - go to home screen
+            Serial.println("[HOME] Battery removed, switching to home screen");
+            current_app_state = STATE_HOME;
+            battery_detected = false;
+            switch_to_screen(SCREEN_HOME);
+        }
     }
 }
 
@@ -1408,6 +1535,19 @@ void create_screen_3(void) {
     // Add M2 state status box - screen 3
     createM2StateBox(screen_3, "screen_3");
 
+    // Emergency Stop button (bottom mid, large and visible)
+    lv_obj_t* screen3_emergency_stop_btn = lv_btn_create(screen_3);
+    lv_obj_set_size(screen3_emergency_stop_btn, 200, 80);
+    lv_obj_align(screen3_emergency_stop_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_style_bg_color(screen3_emergency_stop_btn, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
+    lv_obj_add_event_cb(screen3_emergency_stop_btn, emergency_stop_event_handler, LV_EVENT_CLICKED, NULL);
+    lv_obj_clear_flag(screen3_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* screen3_emergency_stop_label = lv_label_create(screen3_emergency_stop_btn);
+    lv_label_set_text(screen3_emergency_stop_label, "EMERGENCY\nSTOP");
+    lv_obj_set_style_text_font(screen3_emergency_stop_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen3_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+    lv_obj_center(screen3_emergency_stop_label);
+
     // Note: Screen loading is handled by switch_to_screen()
     // lv_scr_load(screen_3); // Removed - handled by screen manager
     Serial.println("[SCREEN] Screen 3 created successfully");
@@ -1453,6 +1593,19 @@ void create_screen_4(void) {
     // Add M2 state status box - screen 4
     createM2StateBox(screen_4, "screen_4");
 
+    // Emergency Stop button (bottom mid, large and visible)
+    lv_obj_t* screen4_emergency_stop_btn = lv_btn_create(screen_4);
+    lv_obj_set_size(screen4_emergency_stop_btn, 200, 80);
+    lv_obj_align(screen4_emergency_stop_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_style_bg_color(screen4_emergency_stop_btn, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
+    lv_obj_add_event_cb(screen4_emergency_stop_btn, emergency_stop_event_handler, LV_EVENT_CLICKED, NULL);
+    lv_obj_clear_flag(screen4_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* screen4_emergency_stop_label = lv_label_create(screen4_emergency_stop_btn);
+    lv_label_set_text(screen4_emergency_stop_label, "EMERGENCY\nSTOP");
+    lv_obj_set_style_text_font(screen4_emergency_stop_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen4_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+    lv_obj_center(screen4_emergency_stop_label);
+
     // Note: Screen loading is handled by switch_to_screen()
     Serial.println("[SCREEN] Screen 4 (CC Mode) created successfully");
 }
@@ -1497,8 +1650,121 @@ void create_screen_5(void) {
     // Add M2 state status box - screen 5
     createM2StateBox(screen_5, "screen_5");
 
+    // Emergency Stop button (bottom mid, large and visible)
+    lv_obj_t* screen5_emergency_stop_btn = lv_btn_create(screen_5);
+    lv_obj_set_size(screen5_emergency_stop_btn, 200, 80);
+    lv_obj_align(screen5_emergency_stop_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_style_bg_color(screen5_emergency_stop_btn, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
+    lv_obj_add_event_cb(screen5_emergency_stop_btn, emergency_stop_event_handler, LV_EVENT_CLICKED, NULL);
+    lv_obj_clear_flag(screen5_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* screen5_emergency_stop_label = lv_label_create(screen5_emergency_stop_btn);
+    lv_label_set_text(screen5_emergency_stop_label, "EMERGENCY\nSTOP");
+    lv_obj_set_style_text_font(screen5_emergency_stop_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen5_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+    lv_obj_center(screen5_emergency_stop_label);
+
     // Note: Screen loading is handled by switch_to_screen()
     Serial.println("[SCREEN] Screen 5 (CV Mode) created successfully");
+}
+
+//screen 6 - Charging complete
+void create_screen_6(void) {
+    screen_6 = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen_6, lv_color_hex(0x90EE90), LV_PART_MAIN);  // Light green background
+    lv_obj_set_style_bg_opa(screen_6, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(screen_6, LV_OPA_COVER, LV_PART_MAIN);
+
+    // Screen NOT scrollable (fixed layout)
+    lv_obj_set_scroll_dir(screen_6, LV_DIR_NONE);  // No scrolling
+
+    // Title
+    lv_obj_t *title = lv_label_create(screen_6);
+    lv_label_set_text(title, "Charging Complete!");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+
+    // Status label
+    lv_obj_t *status_label_6 = lv_label_create(screen_6);
+    lv_label_set_text(status_label_6, "Battery charging completed successfully");
+    lv_obj_set_style_text_color(status_label_6, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
+    lv_obj_set_style_text_font(status_label_6, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(status_label_6, LV_ALIGN_TOP_MID, 0, 60);
+
+    // Move shared data table to screen_6
+    if (data_table != nullptr) {
+        lv_obj_set_parent(data_table, screen_6);
+        lv_obj_set_pos(data_table, 12, 110);
+    }
+
+    // Add M2 state status box - screen 6
+    createM2StateBox(screen_6, "screen_6");
+
+    // Home button (bottom mid)
+    lv_obj_t* screen6_home_btn = lv_btn_create(screen_6);
+    lv_obj_set_size(screen6_home_btn, 200, 80);
+    lv_obj_align(screen6_home_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_style_bg_color(screen6_home_btn, lv_color_hex(0x4A90E2), LV_PART_MAIN);  // Blue
+    lv_obj_add_event_cb(screen6_home_btn, home_button_event_handler, LV_EVENT_CLICKED, NULL);
+    lv_obj_clear_flag(screen6_home_btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* screen6_home_label = lv_label_create(screen6_home_btn);
+    lv_label_set_text(screen6_home_label, "Home");
+    lv_obj_set_style_text_font(screen6_home_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen6_home_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+    lv_obj_center(screen6_home_label);
+
+    // Note: Screen loading is handled by switch_to_screen()
+    Serial.println("[SCREEN] Screen 6 (Charging Complete) created successfully");
+}
+
+//screen 7 - Emergency stop
+void create_screen_7(void) {
+    screen_7 = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen_7, lv_color_hex(0xFF6B6B), LV_PART_MAIN);  // Light red background
+    lv_obj_set_style_bg_opa(screen_7, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(screen_7, LV_OPA_COVER, LV_PART_MAIN);
+
+    // Screen NOT scrollable (fixed layout)
+    lv_obj_set_scroll_dir(screen_7, LV_DIR_NONE);  // No scrolling
+
+    // Title
+    lv_obj_t *title = lv_label_create(screen_7);
+    lv_label_set_text(title, "EMERGENCY STOP");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+
+    // Status label
+    lv_obj_t *status_label_7 = lv_label_create(screen_7);
+    lv_label_set_text(status_label_7, "Charging stopped by user");
+    lv_obj_set_style_text_color(status_label_7, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
+    lv_obj_set_style_text_font(status_label_7, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(status_label_7, LV_ALIGN_TOP_MID, 0, 60);
+
+    // Move shared data table to screen_7
+    if (data_table != nullptr) {
+        lv_obj_set_parent(data_table, screen_7);
+        lv_obj_set_pos(data_table, 12, 110);
+    }
+
+    // Add M2 state status box - screen 7
+    createM2StateBox(screen_7, "screen_7");
+
+    // Home button (bottom mid)
+    lv_obj_t* screen7_home_btn = lv_btn_create(screen_7);
+    lv_obj_set_size(screen7_home_btn, 200, 80);
+    lv_obj_align(screen7_home_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_style_bg_color(screen7_home_btn, lv_color_hex(0x4A90E2), LV_PART_MAIN);  // Blue
+    lv_obj_add_event_cb(screen7_home_btn, home_button_event_handler, LV_EVENT_CLICKED, NULL);
+    lv_obj_clear_flag(screen7_home_btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* screen7_home_label = lv_label_create(screen7_home_btn);
+    lv_label_set_text(screen7_home_label, "Home");
+    lv_obj_set_style_text_font(screen7_home_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen7_home_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+    lv_obj_center(screen7_home_label);
+
+    // Note: Screen loading is handled by switch_to_screen()
+    Serial.println("[SCREEN] Screen 7 (Emergency Stop) created successfully");
 }
 
 
