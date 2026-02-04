@@ -1,4 +1,5 @@
 #include "ble.h"
+#include "wifi_funcs.h"
 #include <string.h>
 
 // Global BLE credentials storage
@@ -66,6 +67,13 @@ void BLEManager::NetworkInfoCallbacks::onWrite(BLECharacteristic *pCharacteristi
             ble_ssid = ssid;
             ble_key = password;
             
+            // Save to preferences for persistent storage
+            if (save_wifi_credentials(ssid.c_str(), password.c_str())) {
+                Serial.println("[NETWORK_INFO] Credentials saved to preferences");
+            } else {
+                Serial.println("[NETWORK_INFO] WARNING: Failed to save credentials to preferences");
+            }
+            
             // Print saved credentials
             Serial.println("[NETWORK_INFO] ========================================");
             Serial.println("[NETWORK_INFO] Credentials saved successfully!");
@@ -76,8 +84,6 @@ void BLEManager::NetworkInfoCallbacks::onWrite(BLECharacteristic *pCharacteristi
             Serial.print(ble_key);
             Serial.println("'");
             Serial.println("[NETWORK_INFO] ========================================");
-            
-            // Note: WiFi connection is not required per user request
         } else {
             Serial.println("[NETWORK_INFO] ERROR: Missing second delimiter. Expected format: 'SSID|password|CONNECT'");
         }
@@ -103,11 +109,21 @@ BLEManager::BLEManager()
 void BLEManager::init() {
     Serial.println("\n[BLE] Starting initialization...");
     
+    // Check if WiFi is already connected before modifying it
+    bool wifi_was_connected = (WiFi.status() == WL_CONNECTED);
+    
     Serial.println("[WiFi] Setting mode to STA");
     WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    delay(100);
-    Serial.println("[WiFi] WiFi initialized");
+    
+    // Only disconnect if WiFi wasn't already connected
+    // This preserves auto-connections from preferences
+    if (!wifi_was_connected) {
+        WiFi.disconnect();
+        delay(100);
+        Serial.println("[WiFi] WiFi initialized (disconnected)");
+    } else {
+        Serial.println("[WiFi] WiFi initialized (preserving existing connection)");
+    }
 
     Serial.println("[BLE] Initializing BLE device");
     BLEDevice::init(BLE_DEVICE_NAME);

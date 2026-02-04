@@ -8,6 +8,7 @@
 #include "sd_logging.h"
 #include "rs485_vfdComs.h"
 #include "ble.h"
+#include "wifi_funcs.h"
 
 // Forward declarations for screen management functions
 extern void initialize_all_screens();
@@ -64,6 +65,17 @@ void setup()
     Serial.begin(115200);
     Serial.setTimeout(10); // Prevent serial blocking
     delay(100); // Small delay for serial stabilization
+
+    // Initialize WiFi preferences
+    init_wifi_preferences();
+    
+    // Auto-connect to WiFi if credentials exist in preferences
+    if (has_wifi_credentials()) {
+        Serial.println("[SETUP] WiFi credentials found in preferences, attempting connection...");
+        connect_to_wifi();
+    } else {
+        Serial.println("[SETUP] No WiFi credentials in preferences, skipping auto-connect");
+    }
 
     Serial.println("Initializing board, code is on github, changed again 2");
     board = new Board();
