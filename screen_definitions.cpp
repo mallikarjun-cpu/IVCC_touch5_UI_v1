@@ -4,6 +4,7 @@
 #include "esp_panel_board_custom_conf.h"
 #include "lvgl_v8_port.h"
 #include "rs485_vfdComs.h"
+#include "ble.h"
 #include <Arduino.h>
 #include <esp_heap_caps.h>
 #include <WiFi.h>
@@ -26,6 +27,11 @@ extern struct time_from_m2 {
     uint8_t second;
 } m2Time;
 
+// External BLE manager and credentials
+extern BLEManager bleManager;
+extern String ble_ssid;
+extern String ble_key;
+
 // ============================================================================
 // WiFi Configuration (hardcoded for testing)
 // ============================================================================
@@ -46,17 +52,18 @@ static const int WIFI_MAX_ATTEMPTS = 20; // 20 attempts * 500ms = 10 seconds
 // ============================================================================
 
 // Screen objects
-lv_obj_t* screen_1 = nullptr;
-lv_obj_t* screen_2 = nullptr;
-lv_obj_t* screen_3 = nullptr;
-lv_obj_t* screen_4 = nullptr;
-lv_obj_t* screen_5 = nullptr;
-lv_obj_t* screen_6 = nullptr;
-lv_obj_t* screen_7 = nullptr;
-lv_obj_t* screen_11 = nullptr;
-lv_obj_t* screen_12 = nullptr;
-lv_obj_t* screen_13 = nullptr;
-lv_obj_t* screen_16 = nullptr;
+lv_obj_t* screen_1 = nullptr; //screen 1 - default screen
+lv_obj_t* screen_2 = nullptr; //screen 2 - battery detected, charge ready page
+lv_obj_t* screen_3 = nullptr; //screen 3 - charging start (waiting for 1A)
+lv_obj_t* screen_4 = nullptr; //screen 4 - Constant Current (CC) mode
+lv_obj_t* screen_5 = nullptr; //screen 5 - Constant Voltage (CV) mode
+lv_obj_t* screen_6 = nullptr; //screen 6 - Charging complete
+lv_obj_t* screen_7 = nullptr; //screen 7 - Emergency stop
+lv_obj_t* screen_11 = nullptr; //screen 11 - battery profiles
+lv_obj_t* screen_12 = nullptr; //screen 12 - WiFi configuration
+lv_obj_t* screen_13 = nullptr; //screen 13 - CAN debug screen
+lv_obj_t* screen_16 = nullptr; //screen 16 - Time debug screen
+lv_obj_t* screen_17 = nullptr; //screen 17 - BLE debug screen
 
 // Shared UI objects (reused between screens)
 static lv_obj_t* status_label = nullptr;
@@ -100,6 +107,7 @@ static lv_obj_t* screen11_back_btn = nullptr;
 
 // screen 12 connection status label
 static lv_obj_t* screen12_connection_status = nullptr;
+static lv_obj_t* screen12_wifi_info = nullptr;
 
 // screen 13 CAN frame display
 static lv_obj_t* screen13_can_frame_label = nullptr;
@@ -109,6 +117,11 @@ static int can_debug_current_line = 0;
 
 // screen 16 time display
 static lv_obj_t* screen16_time_label = nullptr;
+
+// screen 17 BLE debug display
+static lv_obj_t* screen17_wifi_status_label = nullptr;
+static lv_obj_t* screen17_ble_status_label = nullptr;
+static lv_obj_t* screen17_ble_info_label = nullptr;
 
 // ============================================================================
 // Screen Management Globals
@@ -295,6 +308,7 @@ void initialize_all_screens() {
     create_screen_12();  // WiFi config screen
     create_screen_13();  // CAN debug screen
     create_screen_16();  // Time debug screen
+    create_screen_17();  // BLE debug screen
 
     // Start with home screen
     switch_to_screen(SCREEN_HOME);
@@ -341,6 +355,9 @@ void switch_to_screen(screen_id_t screen_id) {
         case SCREEN_TIME_DEBUG:
             target_screen = screen_16;
             break;
+        case SCREEN_BLE_DEBUG:
+            target_screen = screen_17;
+            break;
         default:
             Serial.printf("[SCREEN] ERROR: Invalid screen ID %d\n", screen_id);
             return;
@@ -350,14 +367,23 @@ void switch_to_screen(screen_id_t screen_id) {
         // Update current screen tracking
         current_screen_id = screen_id;
 
-        // Move shared UI elements to the new screen (except screen 12)
-        if (data_table != nullptr && screen_id != SCREEN_WIFI_CONFIG) {
+        // Move shared UI elements to the new screen (except screen 12 and screen 17)
+        if (data_table != nullptr && screen_id != SCREEN_WIFI_CONFIG && screen_id != SCREEN_BLE_DEBUG) {
             lv_obj_set_parent(data_table, target_screen);
             lv_obj_set_pos(data_table, 12, 110);
             lv_obj_clear_flag(data_table, LV_OBJ_FLAG_HIDDEN); // Make sure table is visible
-        } else if (screen_id == SCREEN_WIFI_CONFIG && data_table != nullptr) {
-            // Hide table on WiFi config screen
+        } else if ((screen_id == SCREEN_WIFI_CONFIG || screen_id == SCREEN_BLE_DEBUG) && data_table != nullptr) {
+            // Hide table on WiFi config screen and BLE debug screen
             lv_obj_add_flag(data_table, LV_OBJ_FLAG_HIDDEN);
+        }
+
+        // Update WiFi info display when switching to WiFi config screen
+        if (screen_id == SCREEN_WIFI_CONFIG && screen12_wifi_info != nullptr) {
+            if (ble_ssid.length() > 0 && ble_key.length() > 0) {
+                lv_label_set_text_fmt(screen12_wifi_info, "SSID: %s\nPassword: %s", ble_ssid.c_str(), ble_key.c_str());
+            } else {
+                lv_label_set_text_fmt(screen12_wifi_info, "SSID: %s\nPassword: %s", TEST_WIFI_SSID, TEST_WIFI_PASSWORD);
+            }
         }
 
         // Manage battery container visibility (only for screens that need profiles)
@@ -579,11 +605,24 @@ void update_current_screen() {
     // WiFi connection status updates only when on WiFi config screen
     if (current_screen_id == SCREEN_WIFI_CONFIG) {
         update_wifi_connection_status();
+        // Update WiFi info display to show BLE credentials if available
+        if (screen12_wifi_info != nullptr) {
+            if (ble_ssid.length() > 0 && ble_key.length() > 0) {
+                lv_label_set_text_fmt(screen12_wifi_info, "SSID: %s\nPassword: %s", ble_ssid.c_str(), ble_key.c_str());
+            } else {
+                lv_label_set_text_fmt(screen12_wifi_info, "SSID: %s\nPassword: %s", TEST_WIFI_SSID, TEST_WIFI_PASSWORD);
+            }
+        }
     }
     
     // Time debug display updates only when on time debug screen
     if (current_screen_id == SCREEN_TIME_DEBUG) {
         update_time_debug_display();
+    }
+    
+    // BLE debug display updates only when on BLE debug screen
+    if (current_screen_id == SCREEN_BLE_DEBUG) {
+        update_ble_debug_display();
     }
     
     // Charging control (runs only in charging states, once per second)
@@ -636,6 +675,10 @@ screen_id_t determine_screen_from_state() {
     // Don't switch away from time debug screen based on voltage
     if (current_screen_id == SCREEN_TIME_DEBUG) {
         return SCREEN_TIME_DEBUG;
+    }
+    // Don't switch away from BLE debug screen based on voltage
+    if (current_screen_id == SCREEN_BLE_DEBUG) {
+        return SCREEN_BLE_DEBUG;
     }
     if (battery_detected && sensorData.volt >= 9.0f) {
         return SCREEN_BATTERY_DETECTED;
@@ -972,6 +1015,49 @@ void update_time_debug_display() {
     }
 }
 
+// Update BLE debug display on screen 17
+void update_ble_debug_display() {
+    if (screen17_wifi_status_label != nullptr && screen17_ble_status_label != nullptr && screen17_ble_info_label != nullptr && current_screen_id == SCREEN_BLE_DEBUG) {
+        lvgl_port_lock(-1);
+
+        // Check WiFi connection status
+        bool wifi_connected = (WiFi.status() == WL_CONNECTED);
+        
+        // Check BLE connection status
+        bool ble_connected = bleManager.isConnected();
+
+        // Update WiFi status label with color
+        if (wifi_connected) {
+            lv_label_set_text(screen17_wifi_status_label, "WiFi Connected");
+            lv_obj_set_style_text_color(screen17_wifi_status_label, lv_color_hex(0x00FF00), LV_PART_MAIN);  // Green
+        } else {
+            lv_label_set_text(screen17_wifi_status_label, "WiFi Disconnected");
+            lv_obj_set_style_text_color(screen17_wifi_status_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
+        }
+
+        // Update BLE status label with color
+        if (ble_connected) {
+            lv_label_set_text(screen17_ble_status_label, "BLE Connected");
+            lv_obj_set_style_text_color(screen17_ble_status_label, lv_color_hex(0x00FF00), LV_PART_MAIN);  // Green
+        } else {
+            lv_label_set_text(screen17_ble_status_label, "BLE Disconnected");
+            lv_obj_set_style_text_color(screen17_ble_status_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
+        }
+
+        // Update BLE credentials display
+        char info_text[300];
+        if (ble_ssid.length() > 0 || ble_key.length() > 0) {
+            sprintf(info_text, "SSID: %s\nPassword: %s\n\nCredentials received via BLE", 
+                    ble_ssid.c_str(), ble_key.c_str());
+        } else {
+            sprintf(info_text, "No credentials received yet.\n\nWaiting for Android app to send:\nSSID|password|CONNECT");
+        }
+        lv_label_set_text(screen17_ble_info_label, info_text);
+
+        lvgl_port_unlock();
+    }
+}
+
 // ============================================================================
 // Event Handlers
 // ============================================================================
@@ -1017,6 +1103,16 @@ void screen1_time_debug_btnhandler(lv_event_t * e) {
         Serial.println("[SCREEN] Switching to time debug screen");
         // Switch to time debug screen (no state change needed)
         switch_to_screen(SCREEN_TIME_DEBUG);
+    }
+}
+
+// Screen 1 BLE Debug button event handler
+void screen1_ble_debug_btnhandler(lv_event_t * e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if(code == LV_EVENT_CLICKED) {
+        Serial.println("[SCREEN] Switching to BLE debug screen");
+        // Switch to BLE debug screen (no state change needed)
+        switch_to_screen(SCREEN_BLE_DEBUG);
     }
 }
 
@@ -1197,10 +1293,25 @@ void screen12_connect_event_handler(lv_event_t * e) {
     lv_event_code_t code = lv_event_get_code(e);
     if(code == LV_EVENT_CLICKED) {
         Serial.println("[WIFI] Connect button pressed - starting WiFi connection");
-        Serial.printf("[WIFI] Attempting to connect to SSID: %s\n", TEST_WIFI_SSID);
+        
+        // Use BLE credentials if available, otherwise fall back to defaults
+        const char* ssid_to_use;
+        const char* password_to_use;
+        
+        if (ble_ssid.length() > 0 && ble_key.length() > 0) {
+            ssid_to_use = ble_ssid.c_str();
+            password_to_use = ble_key.c_str();
+            Serial.println("[WIFI] Using credentials received via BLE");
+        } else {
+            ssid_to_use = TEST_WIFI_SSID;
+            password_to_use = TEST_WIFI_PASSWORD;
+            Serial.println("[WIFI] Using default credentials (no BLE credentials available)");
+        }
+        
+        Serial.printf("[WIFI] Attempting to connect to SSID: %s\n", ssid_to_use);
 
         // Start asynchronous WiFi connection
-        WiFi.begin(TEST_WIFI_SSID, TEST_WIFI_PASSWORD);
+        WiFi.begin(ssid_to_use, password_to_use);
 
         // Set connection state
         wifi_connection_in_progress = true;
@@ -1416,6 +1527,19 @@ void create_screen_1()
     lv_obj_set_style_text_font(screen1_time_debug_label, &lv_font_montserrat_20, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen1_time_debug_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen1_time_debug_label);
+
+    // BLE Debug button (next to Time Debug button)
+    lv_obj_t* screen1_ble_debug_btn = lv_btn_create(screen1_button_container);
+    lv_obj_set_size(screen1_ble_debug_btn, 300, 80);
+    lv_obj_set_style_bg_color(screen1_ble_debug_btn, lv_color_hex(0x4169E1), LV_PART_MAIN);  // Royal blue button
+    lv_obj_add_event_cb(screen1_ble_debug_btn, screen1_ble_debug_btnhandler, LV_EVENT_CLICKED, NULL);
+    lv_obj_clear_flag(screen1_ble_debug_btn, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* screen1_ble_debug_label = lv_label_create(screen1_ble_debug_btn);
+    lv_label_set_text(screen1_ble_debug_label, "BLE Debug");
+    lv_obj_set_style_text_font(screen1_ble_debug_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen1_ble_debug_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+    lv_obj_center(screen1_ble_debug_label);
 
     // v4.50: Add M2 state status box (top-left corner) - Screen 1
     createM2StateBox(screen_1, "screen_1");
@@ -2038,11 +2162,12 @@ void create_screen_12(void) {
     lv_obj_align(status_label, LV_ALIGN_TOP_MID, 0, 60);
 
     // WiFi info display
-    lv_obj_t *wifi_info = lv_label_create(screen_12);
-    lv_label_set_text_fmt(wifi_info, "SSID: %s\nPassword: %s", TEST_WIFI_SSID, TEST_WIFI_PASSWORD);
-    lv_obj_set_style_text_color(wifi_info, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_text_font(wifi_info, &lv_font_montserrat_20, LV_PART_MAIN);
-    lv_obj_align(wifi_info, LV_ALIGN_TOP_MID, 0, 120);
+    screen12_wifi_info = lv_label_create(screen_12);
+    // Will be updated dynamically to show BLE credentials if available
+    lv_label_set_text_fmt(screen12_wifi_info, "SSID: %s\nPassword: %s", TEST_WIFI_SSID, TEST_WIFI_PASSWORD);
+    lv_obj_set_style_text_color(screen12_wifi_info, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen12_wifi_info, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_align(screen12_wifi_info, LV_ALIGN_TOP_MID, 0, 120);
 
     // Connection status label
     screen12_connection_status = lv_label_create(screen_12);
@@ -2200,4 +2325,65 @@ void create_screen_16(void) {
     // lv_scr_load(screen_16); // Removed - handled by screen manager
 
     Serial.println("[SCREEN] Screen 16 (Time Debug) created successfully");
+}
+
+//screen 17 - BLE debug screen
+void create_screen_17(void) {
+    screen_17 = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen_17, lv_color_hex(0xADD8E6), LV_PART_MAIN);  // Light blue background
+    lv_obj_set_style_bg_opa(screen_17, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(screen_17, LV_OPA_COVER, LV_PART_MAIN);
+
+    // Screen NOT scrollable (fixed layout)
+    lv_obj_set_scroll_dir(screen_17, LV_DIR_NONE);  // No scrolling
+
+    // Title
+    lv_obj_t *title = lv_label_create(screen_17);
+    lv_label_set_text(title, "BLE Debug");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);  
+
+    // WiFi connection status label (first line, left side)
+    screen17_wifi_status_label = lv_label_create(screen_17);
+    lv_label_set_text(screen17_wifi_status_label, "WiFi Disconnected");
+    lv_obj_set_style_text_font(screen17_wifi_status_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen17_wifi_status_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red initially
+    lv_obj_align(screen17_wifi_status_label, LV_ALIGN_TOP_LEFT, 20, 90);  // Moved down by 30px (60 -> 90)
+
+    // BLE connection status label (first line, center aligned)
+    screen17_ble_status_label = lv_label_create(screen_17);
+    lv_label_set_text(screen17_ble_status_label, "BLE Disconnected");
+    lv_obj_set_style_text_font(screen17_ble_status_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen17_ble_status_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red initially
+    lv_obj_align(screen17_ble_status_label, LV_ALIGN_TOP_MID, 0, 90);  // Moved down by 30px (60 -> 90), center aligned
+
+    // BLE info display label (SSID and password)
+    screen17_ble_info_label = lv_label_create(screen_17);
+    lv_label_set_text(screen17_ble_info_label, "No credentials received yet...");
+    lv_obj_set_style_text_font(screen17_ble_info_label, &lv_font_montserrat_26, LV_PART_MAIN);  // Changed from 20 to 26
+    lv_obj_set_style_text_color(screen17_ble_info_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_align(screen17_ble_info_label, LV_ALIGN_TOP_LEFT, 20, 150);  // Moved down by 30px (120 -> 150)
+    lv_obj_set_width(screen17_ble_info_label, 960);  // Set width for text wrapping
+    lv_label_set_long_mode(screen17_ble_info_label, LV_LABEL_LONG_WRAP);
+
+    // Back button (top right)
+    lv_obj_t *screen17_back_btn = lv_btn_create(screen_17);
+    lv_obj_set_size(screen17_back_btn, 100, 50);
+    lv_obj_align(screen17_back_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
+    lv_obj_set_style_bg_color(screen17_back_btn, lv_color_hex(0xFF4444), LV_PART_MAIN);  // Red back button
+    lv_obj_add_event_cb(screen17_back_btn, screen11_back_button_event_handler, LV_EVENT_CLICKED, NULL);  // Reuse existing back handler
+    lv_obj_t* back_label = lv_label_create(screen17_back_btn);
+    lv_label_set_text(back_label, "BACK");
+    lv_obj_set_style_text_font(back_label, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_color(back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_center(back_label);
+
+    // Add M2 state status box (same position as screen 1)
+    createM2StateBox(screen_17, "screen_17");
+
+    // Note: Screen loading is handled by switch_to_screen()
+    // lv_scr_load(screen_17); // Removed - handled by screen manager
+
+    Serial.println("[SCREEN] Screen 17 (BLE Debug) created successfully");
 }

@@ -7,6 +7,7 @@
 #include "can_twai.h"
 #include "sd_logging.h"
 #include "rs485_vfdComs.h"
+#include "ble.h"
 
 // Forward declarations for screen management functions
 extern void initialize_all_screens();
@@ -42,6 +43,7 @@ struct time_from_m2 {
 // Global instances definitions
 ScreenLogger screenLogger;
 sd_logging sdLogger;
+BLEManager bleManager;
 
 using namespace esp_panel::drivers;
 using namespace esp_panel::board;
@@ -124,6 +126,11 @@ void setup()
     // Initialize battery profiles after SD card setup
     initializeBatteryProfiles();
 
+    // Initialize BLE after battery profiles
+    Serial.println("Initializing BLE...");
+    bleManager.init();
+    Serial.println("BLE initialized successfully");
+
     Serial.println("End of setup, setup success! ------------  \n -----");
 }
 
@@ -132,6 +139,9 @@ void loop()
     //Serial.println("IDLE loop");
     //check serial rx buffer. (for input cmds. ) and print .
     process_serial_cmd();
+
+    // Process BLE events (non-blocking)
+    bleManager.process();
 
     // Periodic screen state check (non-blocking)
     update_screen_based_on_state();
