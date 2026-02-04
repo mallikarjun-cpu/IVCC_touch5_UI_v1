@@ -109,6 +109,9 @@ static lv_obj_t* screen11_back_btn = nullptr;
 static lv_obj_t* screen12_connection_status = nullptr;
 static lv_obj_t* screen12_wifi_info = nullptr;
 
+// screen 1 WiFi status display
+static lv_obj_t* screen1_wifi_status_label = nullptr;
+
 // screen 13 CAN frame display
 static lv_obj_t* screen13_can_frame_label = nullptr;
 #define CAN_DEBUG_MAX_LINES 5
@@ -123,6 +126,11 @@ static lv_obj_t* screen17_wifi_status_label = nullptr;
 static lv_obj_t* screen17_ble_status_label = nullptr;
 static lv_obj_t* screen17_ble_info_label = nullptr;
 
+// Reboot countdown variables
+static bool reboot_countdown_active = false;
+static unsigned long reboot_countdown_start_time = 0;
+static const unsigned long REBOOT_COUNTDOWN_DURATION = 5000; // 5 seconds
+
 // ============================================================================
 // Screen Management Globals
 // ============================================================================
@@ -135,6 +143,7 @@ charge_stop_reason_t charge_stop_reason = CHARGE_STOP_NONE;
 // State-based screen switching triggers
 bool battery_detected = false;
 bool wifi_config_requested = false;
+static bool screen11_profiles_need_refresh = false; // Flag to refresh screen 11 profiles
 
 // ============================================================================
 // Charging Control Globals
@@ -288,6 +297,8 @@ void displayMatchingBatteryProfiles(float detectedVoltage, lv_obj_t* container);
 void emergency_stop_event_handler(lv_event_t * e);
 // Forward declaration for home button handler
 void home_button_event_handler(lv_event_t * e);
+// Forward declaration for WiFi status update
+void update_screen1_wifi_status(void);
 
 // ============================================================================
 // Screen Management Functions
@@ -410,8 +421,8 @@ void switch_to_screen(screen_id_t screen_id) {
         if (screen11_battery_container != nullptr) {
             if (screen_id == SCREEN_BATTERY_PROFILES) {
                 lv_obj_clear_flag(screen11_battery_container, LV_OBJ_FLAG_HIDDEN);
-                // Refresh profiles display when switching to screen 11
-                displayAllBatteryProfiles(screen11_battery_container);
+                // Note: displayAllBatteryProfiles will be called after screen is loaded
+                // to avoid blocking during screen switch
             } else {
                 lv_obj_add_flag(screen11_battery_container, LV_OBJ_FLAG_HIDDEN);
             }
@@ -424,6 +435,14 @@ void switch_to_screen(screen_id_t screen_id) {
         lv_scr_load(target_screen);
 
         Serial.printf("[SCREEN] Switched to screen %d\n", screen_id);
+        
+        // Set flag to refresh profiles display (for screen 11)
+        // This will be handled in update_current_screen() to avoid blocking
+        if (screen_id == SCREEN_BATTERY_PROFILES) {
+            screen11_profiles_need_refresh = true;
+        } else {
+            screen11_profiles_need_refresh = false;
+        }
     } else {
         Serial.printf("[SCREEN] ERROR: Screen %d not initialized\n", screen_id);
     }
@@ -602,6 +621,11 @@ void update_charging_control() {
 
 // Update current screen content (screen-specific updates)
 void update_current_screen() {
+    // WiFi status display updates on screen 1 (home screen)
+    if (current_screen_id == SCREEN_HOME) {
+        update_screen1_wifi_status();
+    }
+    
     // WiFi connection status updates only when on WiFi config screen
     if (current_screen_id == SCREEN_WIFI_CONFIG) {
         update_wifi_connection_status();
@@ -623,6 +647,12 @@ void update_current_screen() {
     // BLE debug display updates only when on BLE debug screen
     if (current_screen_id == SCREEN_BLE_DEBUG) {
         update_ble_debug_display();
+    }
+    
+    // Refresh screen 11 profiles if needed (deferred to avoid blocking screen switch)
+    if (screen11_profiles_need_refresh && screen11_battery_container != nullptr && current_screen_id == SCREEN_BATTERY_PROFILES) {
+        screen11_profiles_need_refresh = false;
+        displayAllBatteryProfiles(screen11_battery_container);
     }
     
     // Charging control (runs only in charging states, once per second)
@@ -781,6 +811,9 @@ void displayAllBatteryProfiles(lv_obj_t* container) {
         return;
     }
 
+    // Lock LVGL before making UI changes
+    lvgl_port_lock(-1);
+
     // Clear any existing content
     lv_obj_clean(container);
 
@@ -797,6 +830,7 @@ void displayAllBatteryProfiles(lv_obj_t* container) {
         lv_obj_set_style_text_font(no_profiles_label, &lv_font_montserrat_20, LV_PART_MAIN);
         lv_obj_set_style_text_color(no_profiles_label, lv_color_hex(0xFF0000), LV_PART_MAIN);
         lv_obj_center(no_profiles_label);
+        lvgl_port_unlock();
         return;
     }
 
@@ -832,6 +866,9 @@ void displayAllBatteryProfiles(lv_obj_t* container) {
         // Move to next button position
         button_y += button_height + button_spacing;
     }
+
+    // Unlock LVGL after UI changes
+    lvgl_port_unlock();
 }
 
 // ============================================================================
@@ -1015,6 +1052,27 @@ void update_time_debug_display() {
     }
 }
 
+// Update WiFi status display on screen 1
+void update_screen1_wifi_status() {
+    if (screen1_wifi_status_label != nullptr && current_screen_id == SCREEN_HOME) {
+        lvgl_port_lock(-1);
+        
+        bool wifi_connected = (WiFi.status() == WL_CONNECTED);
+        
+        if (wifi_connected) {
+            lv_label_set_text(screen1_wifi_status_label, "WiFi");
+            lv_obj_set_style_text_color(screen1_wifi_status_label, lv_color_hex(0x00FF00), LV_PART_MAIN);  // Green
+            lv_obj_set_style_bg_color(screen1_wifi_status_label, lv_color_hex(0xE8F5E9), LV_PART_MAIN);  // Light green background
+        } else {
+            lv_label_set_text(screen1_wifi_status_label, "WiFi");
+            lv_obj_set_style_text_color(screen1_wifi_status_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
+            lv_obj_set_style_bg_color(screen1_wifi_status_label, lv_color_hex(0xFFEBEE), LV_PART_MAIN);  // Light red background
+        }
+        
+        lvgl_port_unlock();
+    }
+}
+
 // Update BLE debug display on screen 17
 void update_ble_debug_display() {
     if (screen17_wifi_status_label != nullptr && screen17_ble_status_label != nullptr && screen17_ble_info_label != nullptr && current_screen_id == SCREEN_BLE_DEBUG) {
@@ -1046,7 +1104,17 @@ void update_ble_debug_display() {
 
         // Update BLE credentials display
         char info_text[300];
-        if (ble_ssid.length() > 0 || ble_key.length() > 0) {
+        if (reboot_countdown_active) {
+            // Show countdown message
+            unsigned long elapsed = millis() - reboot_countdown_start_time;
+            unsigned long remaining = (REBOOT_COUNTDOWN_DURATION - elapsed) / 1000;
+            if (remaining > 5) remaining = 5;
+            if (remaining < 0) remaining = 0;
+            unsigned long current_second = 5 - remaining + 1; // 1/5, 2/5, etc.
+            
+            sprintf(info_text, "SSID: %s\nPassword: %s\n\nCredentials saved!\n\nDevice will reboot to connect to WiFi\nin %lu/6 secs", 
+                    ble_ssid.c_str(), ble_key.c_str(), current_second);
+        } else if (ble_ssid.length() > 0 || ble_key.length() > 0) {
             sprintf(info_text, "SSID: %s\nPassword: %s\n\nCredentials received via BLE", 
                     ble_ssid.c_str(), ble_key.c_str());
         } else {
@@ -1055,6 +1123,33 @@ void update_ble_debug_display() {
         lv_label_set_text(screen17_ble_info_label, info_text);
 
         lvgl_port_unlock();
+    }
+}
+
+// Start reboot countdown (called after WiFi credentials are saved)
+void start_reboot_countdown(void) {
+    reboot_countdown_active = true;
+    reboot_countdown_start_time = millis();
+    Serial.println("[REBOOT] Starting 5-second countdown before reboot...");
+}
+
+// Process reboot countdown and reboot if time elapsed
+void process_reboot_countdown(void) {
+    if (reboot_countdown_active) {
+        unsigned long elapsed = millis() - reboot_countdown_start_time;
+        
+        if (elapsed >= REBOOT_COUNTDOWN_DURATION) {
+            Serial.println("[REBOOT] Countdown complete, rebooting device...");
+            delay(100); // Small delay to ensure serial message is sent
+            ESP.restart();
+        } else {
+            // Update display every second to show countdown
+            static unsigned long last_countdown_update = 0;
+            if (millis() - last_countdown_update >= 1000) {
+                last_countdown_update = millis();
+                update_ble_debug_display(); // Update screen 17 with countdown
+            }
+        }
     }
 }
 
@@ -1543,6 +1638,20 @@ void create_screen_1()
 
     // v4.50: Add M2 state status box (top-left corner) - Screen 1
     createM2StateBox(screen_1, "screen_1");
+
+    // WiFi status display box (top-right corner) - Screen 1
+    screen1_wifi_status_label = lv_label_create(screen_1);
+    lv_label_set_text(screen1_wifi_status_label, "WiFi");
+    lv_obj_set_style_text_font(screen1_wifi_status_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen1_wifi_status_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red initially
+    lv_obj_set_style_bg_color(screen1_wifi_status_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White background
+    lv_obj_set_style_bg_opa(screen1_wifi_status_label, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(screen1_wifi_status_label, 8, LV_PART_MAIN);
+    lv_obj_set_style_border_width(screen1_wifi_status_label, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(screen1_wifi_status_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_align(screen1_wifi_status_label, LV_ALIGN_TOP_RIGHT, -10, 10);
+    lv_obj_set_width(screen1_wifi_status_label, 100);
+    lv_obj_set_style_text_align(screen1_wifi_status_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
 
     // Note: Screen loading is handled by switch_to_screen()
     // lv_scr_load(screen_1); // Removed - handled by screen manager

@@ -1,5 +1,6 @@
 #include "ble.h"
 #include "wifi_funcs.h"
+#include "screen_definitions.h"
 #include <string.h>
 
 // Global BLE credentials storage
@@ -70,20 +71,23 @@ void BLEManager::NetworkInfoCallbacks::onWrite(BLECharacteristic *pCharacteristi
             // Save to preferences for persistent storage
             if (save_wifi_credentials(ssid.c_str(), password.c_str())) {
                 Serial.println("[NETWORK_INFO] Credentials saved to preferences");
+                
+                // Print saved credentials
+                Serial.println("[NETWORK_INFO] ========================================");
+                Serial.println("[NETWORK_INFO] Credentials saved successfully!");
+                Serial.print("[NETWORK_INFO] SSID: '");
+                Serial.print(ble_ssid);
+                Serial.println("'");
+                Serial.print("[NETWORK_INFO] Password: '");
+                Serial.print(ble_key);
+                Serial.println("'");
+                Serial.println("[NETWORK_INFO] ========================================");
+                
+                // Start reboot countdown
+                start_reboot_countdown();
             } else {
                 Serial.println("[NETWORK_INFO] WARNING: Failed to save credentials to preferences");
             }
-            
-            // Print saved credentials
-            Serial.println("[NETWORK_INFO] ========================================");
-            Serial.println("[NETWORK_INFO] Credentials saved successfully!");
-            Serial.print("[NETWORK_INFO] SSID: '");
-            Serial.print(ble_ssid);
-            Serial.println("'");
-            Serial.print("[NETWORK_INFO] Password: '");
-            Serial.print(ble_key);
-            Serial.println("'");
-            Serial.println("[NETWORK_INFO] ========================================");
         } else {
             Serial.println("[NETWORK_INFO] ERROR: Missing second delimiter. Expected format: 'SSID|password|CONNECT'");
         }

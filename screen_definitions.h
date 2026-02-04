@@ -95,6 +95,8 @@ void update_can_debug_display(uint32_t id, uint8_t* data, uint8_t length);
 void update_time_debug_display(void); // Update time display on screen 16
 void update_ble_debug_display(void); // Update BLE display on screen 17
 void update_charging_control(void); // Charging control logic (CC/CV)
+void start_reboot_countdown(void); // Start 5-second countdown before reboot
+void process_reboot_countdown(void); // Process countdown and reboot if needed
 
 // M2 State Management Functions
 void updateM2State(m2_state_t new_state);

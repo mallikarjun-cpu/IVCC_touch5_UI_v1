@@ -15,6 +15,7 @@ extern void initialize_all_screens();
 extern void update_screen_based_on_state();
 extern void update_table_values();
 extern void update_wifi_connection_status();
+extern void process_reboot_countdown();
 unsigned long last_table_update;
 
 // Forward declarations for screen management variables
@@ -166,6 +167,9 @@ void loop()
         update_table_values();
         last_table_update = millis();
     }
+
+    // Process reboot countdown if active
+    process_reboot_countdown();
 
     delay(200);
 }
