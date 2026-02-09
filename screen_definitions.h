@@ -6,14 +6,12 @@
 
 // Global screen objects
 extern lv_obj_t* screen_1;
-extern lv_obj_t* screen_11;
 extern lv_obj_t* screen_2;
 extern lv_obj_t* screen_3;
 extern lv_obj_t* screen_4;
 extern lv_obj_t* screen_5;
 extern lv_obj_t* screen_6;
 extern lv_obj_t* screen_7;
-extern lv_obj_t* screen_12;
 extern lv_obj_t* screen_13;
 extern lv_obj_t* screen_16;
 extern lv_obj_t* screen_17;
@@ -27,8 +25,6 @@ typedef enum {
     SCREEN_CHARGING_CV,        // Screen 5 - Constant Voltage mode
     SCREEN_CHARGING_COMPLETE,  // Screen 6 - Charging complete
     SCREEN_EMERGENCY_STOP,     // Screen 7 - Emergency stop
-    SCREEN_BATTERY_PROFILES,   // Screen 11 - Battery profiles
-    SCREEN_WIFI_CONFIG,        // Screen 12 - WiFi configuration
     SCREEN_CAN_DEBUG,          // Screen 13 - CAN debug screen
     SCREEN_TIME_DEBUG = 16,    // Screen 16 - Time debug screen
     SCREEN_BLE_DEBUG = 17      // Screen 17 - BLE debug screen
@@ -41,9 +37,7 @@ typedef enum {
     STATE_CHARGING_CC,            // Constant Current mode
     STATE_CHARGING_CV,            // Constant Voltage mode
     STATE_CHARGING_COMPLETE,      // Charging complete
-    STATE_EMERGENCY_STOP,         // Emergency stop
-    STATE_BATTERY_PROFILES = 11,  // Battery profiles menu
-    STATE_WIFI_CONFIG = 12        // WiFi configuration
+    STATE_EMERGENCY_STOP          // Emergency stop
 } app_state_t;
 
 // Charge stop reason enum
@@ -69,14 +63,12 @@ typedef struct {
 
 // Function declarations for creating custom UI screens
 void create_screen_1(void); //screen 1 - default screen
-void create_screen_11(void); //screen 11 - all battery profiles
 void create_screen_2(void); //screen 2 - battery detected, charge ready page
 void create_screen_3(void); //screen 3 - charging start (waiting for 1A)
 void create_screen_4(void); //screen 4 - Constant Current (CC) mode
 void create_screen_5(void); //screen 5 - Constant Voltage (CV) mode
 void create_screen_6(void); //screen 6 - Charging complete
 void create_screen_7(void); //screen 7 - Emergency stop
-void create_screen_12(void); //screen 12 - wifi configs
 void create_screen_13(void); //screen 13 - CAN debug screen
 void create_screen_16(void); //screen 16 - Time debug screen
 void create_screen_17(void); //screen 17 - BLE debug screen

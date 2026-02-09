@@ -22,22 +22,26 @@
 
 /* Frequency calculation constants - 3kW VFD Configuration */
 /* Frequency step sizes (in 0.01Hz units) */
-#define RS485_CALC_FREQ_COND01    (50)  // 0.50Hz - Large error step
-#define RS485_CALC_FREQ_COND02    (25)  // 0.25Hz - Medium error step
-#define RS485_CALC_FREQ_COND03    (10)  // 0.10Hz - Small error step
-#define RS485_CALC_FREQ_COND00    (1)   // 0.01Hz - Tiny error step (fine control)
-#define RS485_CALC_FREQ_COND11    (50)  // 0.50Hz - CV reverse large
-#define RS485_CALC_FREQ_COND12    (20)  // 0.20Hz - CV reverse medium
-#define RS485_CALC_FREQ_COND13    (1)   // 0.01Hz - CV reverse small
+#define RS485_CALC_FREQ_COND05    (200)    // 2.00Hz - Very large error step (20A+)
+#define RS485_CALC_FREQ_COND04    (100)    // 1.00Hz - Large error step (15-20A)
+#define RS485_CALC_FREQ_COND01    (50)     // 0.50Hz - Medium-large error step (7-15A)
+#define RS485_CALC_FREQ_COND02    (30)     // 0.30Hz - Medium error step (5-7A)
+#define RS485_CALC_FREQ_COND03    (10)     // 0.10Hz - Small error step (2-5A)
+#define RS485_CALC_FREQ_COND00    (1)      // 0.01Hz - Tiny error step (fine control, <2A)
+#define RS485_CALC_FREQ_COND11    (50)     // 0.50Hz - CV reverse large
+#define RS485_CALC_FREQ_COND12    (20)     // 0.20Hz - CV reverse medium
+#define RS485_CALC_FREQ_COND13    (1)      // 0.01Hz - CV reverse small
 
 /* Frequency limits (in 0.01Hz units) - 3kW: max 300Hz, min 30Hz */
 #define RS485_FREQ_MAX            (30000)  // 300.00 Hz
 #define RS485_FREQ_MIN            (3000)   // 30.00 Hz
 
 /* Error thresholds (in 0.01A or 0.01V units) - adjust based on your sensor scaling */
-#define RS485_ERROR_CURRENT_LARGE (2000)   // 20.00A difference
-#define RS485_ERROR_CURRENT_MID   (1500)   // 15.00A difference
-#define RS485_ERROR_CURRENT_SMALL (700)    // 7.00A difference
+#define RS485_ERROR_CURRENT_VERY_LARGE (2000)  // 20.00A difference -> 200Hz step
+#define RS485_ERROR_CURRENT_LARGE (1500)      // 15.00A difference -> 100Hz step
+#define RS485_ERROR_CURRENT_MID   (700)       // 7.00A difference -> 50Hz step
+#define RS485_ERROR_CURRENT_SMALL (500)       // 5.00A difference -> 30Hz step
+#define RS485_ERROR_CURRENT_TINY  (200)       // 2.00A difference -> 10Hz step
 #define RS485_ERROR_VOLTAGE_LARGE (400)    // 4.00V difference
 #define RS485_ERROR_VOLTAGE_MID   (200)    // 2.00V difference
 #define RS485_ERROR_VOLTAGE_SMALL (100)    // 1.00V difference

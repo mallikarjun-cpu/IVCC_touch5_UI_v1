@@ -59,8 +59,6 @@ lv_obj_t* screen_4 = nullptr; //screen 4 - Constant Current (CC) mode
 lv_obj_t* screen_5 = nullptr; //screen 5 - Constant Voltage (CV) mode
 lv_obj_t* screen_6 = nullptr; //screen 6 - Charging complete
 lv_obj_t* screen_7 = nullptr; //screen 7 - Emergency stop
-lv_obj_t* screen_11 = nullptr; //screen 11 - battery profiles
-lv_obj_t* screen_12 = nullptr; //screen 12 - WiFi configuration
 lv_obj_t* screen_13 = nullptr; //screen 13 - CAN debug screen
 lv_obj_t* screen_16 = nullptr; //screen 16 - Time debug screen
 lv_obj_t* screen_17 = nullptr; //screen 17 - BLE debug screen
@@ -71,11 +69,28 @@ static lv_obj_t* data_table = nullptr;  // Shared table shown on all screens
 // Battery container references for screens that need profiles
 static lv_obj_t* screen2_battery_container = nullptr;
 static lv_obj_t* screen2_button_container = nullptr;
-static lv_obj_t* screen11_battery_container = nullptr;
 
-// Selected battery profile for screen 3 display
+// Selected battery profile for screen 3, 4, 5 display
 static BatteryType* selected_battery_profile = nullptr;
 static lv_obj_t* screen3_battery_details_label = nullptr;
+static lv_obj_t* screen4_battery_details_label = nullptr;
+static lv_obj_t* screen5_battery_details_label = nullptr;
+
+// Timer variables for charging screens
+static unsigned long charging_start_time = 0;  // When charging started (screen 3)
+static unsigned long cv_start_time = 0;        // When CV state started (screen 5)
+static unsigned long cc_state_duration_for_timer = 0;  // CC state duration for remaining time calc
+static unsigned long final_charging_time_ms = 0;  // Final charging time when complete (stops updating)
+static unsigned long final_remaining_time_ms = 0;  // Final remaining time when complete (stops updating)
+static bool charging_complete = false;  // Flag to stop timer updates after completion
+static bool pending_stop_command = false;  // Flag to send stop command after screen loads
+
+// Timer table objects for screens 3, 4, 5, 6, 7
+static lv_obj_t* screen3_timer_table = nullptr;
+static lv_obj_t* screen4_timer_table = nullptr;
+static lv_obj_t* screen5_timer_table = nullptr;
+static lv_obj_t* screen6_timer_table = nullptr;
+static lv_obj_t* screen7_timer_table = nullptr;
 
 // screen 2 confirmation popup
 static lv_obj_t* screen2_confirm_popup = nullptr;
@@ -86,28 +101,6 @@ static lv_obj_t* screen2_confirm_current_label = nullptr;
 static lv_obj_t* screen2_confirm_type_label = nullptr;
 static lv_obj_t* screen2_confirm_agree_btn = nullptr;
 static lv_obj_t* screen2_confirm_change_btn = nullptr;
-
-// screen 11 button objects
-static lv_obj_t* screen11_button_container = nullptr;
-static lv_obj_t* screen11_stop_button = nullptr;
-static lv_obj_t* screen11_start_button = nullptr;
-
-// screen 11 confirmation popup objects
-static lv_obj_t* screen11_confirm_popup = nullptr;
-static lv_obj_t* screen11_confirm_title_label = nullptr;
-static lv_obj_t* screen11_confirm_voltage_label = nullptr;
-static lv_obj_t* screen11_confirm_capacity_label = nullptr;
-static lv_obj_t* screen11_confirm_current_label = nullptr;
-static lv_obj_t* screen11_confirm_type_label = nullptr;
-static lv_obj_t* screen11_confirm_agree_btn = nullptr;
-static lv_obj_t* screen11_confirm_change_btn = nullptr;
-
-// screen 11 back button
-static lv_obj_t* screen11_back_btn = nullptr;
-
-// screen 12 connection status label
-static lv_obj_t* screen12_connection_status = nullptr;
-static lv_obj_t* screen12_wifi_info = nullptr;
 
 // screen 1 WiFi status display
 static lv_obj_t* screen1_wifi_status_label = nullptr;
@@ -142,8 +135,6 @@ charge_stop_reason_t charge_stop_reason = CHARGE_STOP_NONE;
 
 // State-based screen switching triggers
 bool battery_detected = false;
-bool wifi_config_requested = false;
-static bool screen11_profiles_need_refresh = false; // Flag to refresh screen 11 profiles
 
 // ============================================================================
 // Charging Control Globals
@@ -215,8 +206,6 @@ void createM2StateBox(lv_obj_t *parent_screen, const char* screen_name)
     else if (strcmp(screen_name, "screen_3") == 0) screen_index = 3;
     else if (strcmp(screen_name, "screen_4") == 0) screen_index = 4;
     else if (strcmp(screen_name, "screen_5") == 0) screen_index = 5;
-    else if (strcmp(screen_name, "screen_11") == 0) screen_index = 11;
-    else if (strcmp(screen_name, "screen_12") == 0) screen_index = 12;
 
     if (screen_index >= 0 && screen_index < MAX_SCREENS) {
         m2_state_box_array[screen_index] = box;
@@ -290,7 +279,6 @@ void updateM2ConnectionStatus(bool connected) {
 }
 
 // Forward declarations for battery profile functions
-void displayAllBatteryProfiles(lv_obj_t* container);
 void displayMatchingBatteryProfiles(float detectedVoltage, lv_obj_t* container);
 
 // Forward declaration for emergency stop handler
@@ -315,8 +303,6 @@ void initialize_all_screens() {
     create_screen_5();   // CV mode screen
     create_screen_6();   // Charging complete screen
     create_screen_7();   // Emergency stop screen
-    create_screen_11();  // Battery profiles screen
-    create_screen_12();  // WiFi config screen
     create_screen_13();  // CAN debug screen
     create_screen_16();  // Time debug screen
     create_screen_17();  // BLE debug screen
@@ -354,12 +340,6 @@ void switch_to_screen(screen_id_t screen_id) {
         case SCREEN_EMERGENCY_STOP:
             target_screen = screen_7;
             break;
-        case SCREEN_BATTERY_PROFILES:
-            target_screen = screen_11;
-            break;
-        case SCREEN_WIFI_CONFIG:
-            target_screen = screen_12;
-            break;
         case SCREEN_CAN_DEBUG:
             target_screen = screen_13;
             break;
@@ -378,23 +358,23 @@ void switch_to_screen(screen_id_t screen_id) {
         // Update current screen tracking
         current_screen_id = screen_id;
 
-        // Move shared UI elements to the new screen (except screen 12 and screen 17)
-        if (data_table != nullptr && screen_id != SCREEN_WIFI_CONFIG && screen_id != SCREEN_BLE_DEBUG) {
+        // Move shared UI elements to the new screen (except screen 17)
+        if (data_table != nullptr && screen_id != SCREEN_BLE_DEBUG) {
             lv_obj_set_parent(data_table, target_screen);
             lv_obj_set_pos(data_table, 12, 110);
             lv_obj_clear_flag(data_table, LV_OBJ_FLAG_HIDDEN); // Make sure table is visible
-        } else if ((screen_id == SCREEN_WIFI_CONFIG || screen_id == SCREEN_BLE_DEBUG) && data_table != nullptr) {
-            // Hide table on WiFi config screen and BLE debug screen
+        } else if (screen_id == SCREEN_BLE_DEBUG && data_table != nullptr) {
+            // Hide table on BLE debug screen
             lv_obj_add_flag(data_table, LV_OBJ_FLAG_HIDDEN);
         }
-
-        // Update WiFi info display when switching to WiFi config screen
-        if (screen_id == SCREEN_WIFI_CONFIG && screen12_wifi_info != nullptr) {
-            if (ble_ssid.length() > 0 && ble_key.length() > 0) {
-                lv_label_set_text_fmt(screen12_wifi_info, "SSID: %s\nPassword: %s", ble_ssid.c_str(), ble_key.c_str());
-            } else {
-                lv_label_set_text_fmt(screen12_wifi_info, "SSID: %s\nPassword: %s", TEST_WIFI_SSID, TEST_WIFI_PASSWORD);
-            }
+        
+        // Send stop command after screen 6 or 7 loads (if pending)
+        if (pending_stop_command && (screen_id == SCREEN_CHARGING_COMPLETE || screen_id == SCREEN_EMERGENCY_STOP)) {
+            delay(50);  // Give screen time to fully load
+            Serial.println("[CHARGING] Sending STOP command to VFD after screen load...");
+            rs485_sendStopCommand();
+            Serial.println("[CHARGING] Stop command sent to VFD - Motor should now be stopped");
+            pending_stop_command = false;  // Clear flag
         }
 
         // Manage battery container visibility (only for screens that need profiles)
@@ -418,15 +398,6 @@ void switch_to_screen(screen_id_t screen_id) {
                 lv_obj_add_flag(screen2_battery_container, LV_OBJ_FLAG_HIDDEN);
             }
         }
-        if (screen11_battery_container != nullptr) {
-            if (screen_id == SCREEN_BATTERY_PROFILES) {
-                lv_obj_clear_flag(screen11_battery_container, LV_OBJ_FLAG_HIDDEN);
-                // Note: displayAllBatteryProfiles will be called after screen is loaded
-                // to avoid blocking during screen switch
-            } else {
-                lv_obj_add_flag(screen11_battery_container, LV_OBJ_FLAG_HIDDEN);
-            }
-        }
 
         // Update M2 state box for current screen
         update_m2_state_display();
@@ -435,14 +406,6 @@ void switch_to_screen(screen_id_t screen_id) {
         lv_scr_load(target_screen);
 
         Serial.printf("[SCREEN] Switched to screen %d\n", screen_id);
-        
-        // Set flag to refresh profiles display (for screen 11)
-        // This will be handled in update_current_screen() to avoid blocking
-        if (screen_id == SCREEN_BATTERY_PROFILES) {
-            screen11_profiles_need_refresh = true;
-        } else {
-            screen11_profiles_need_refresh = false;
-        }
     } else {
         Serial.printf("[SCREEN] ERROR: Screen %d not initialized\n", screen_id);
     }
@@ -546,12 +509,26 @@ void update_charging_control() {
             // Calculate CC state duration before transitioning
             if (cc_state_start_time > 0) {
                 cc_state_duration = millis() - cc_state_start_time;
+                cc_state_duration_for_timer = cc_state_duration;  // Store for remaining time calculation
                 Serial.printf("[CHARGING] CC state duration: %lu ms (%.2f minutes)\n", 
                     cc_state_duration, cc_state_duration / 60000.0f);
             }
             current_app_state = STATE_CHARGING_CV;
-            cv_state_start_time = millis();  // Record CV state start time
+            cv_state_start_time = millis();  // Record CV state start time for charging control
+            cv_start_time = millis();  // Record CV state start time for timer display
             Serial.println("[CHARGING] CV state timing started");
+            
+            // Calculate initial remaining time for immediate display
+            if (cc_state_duration_for_timer > 0) {
+                unsigned long cv_33_percent_time = cc_state_duration_for_timer / 3;  // 33% of CC time
+                unsigned long cv_30_min = 30 * 60 * 1000;  // 30 minutes in ms
+                unsigned long target_cv_time = (cv_33_percent_time < cv_30_min) ? cv_33_percent_time : cv_30_min;
+                unsigned long rem_seconds = target_cv_time / 1000;
+                unsigned long rem_minutes = rem_seconds / 60;
+                rem_seconds = rem_seconds % 60;
+                Serial.printf("[CHARGING] Initial remaining time: %02lu:%02lu (target CV time: %lu ms)\n", 
+                             rem_minutes, rem_seconds, target_cv_time);
+            }
             // Screen switch will happen in determine_screen_from_state()
         }
     }
@@ -594,6 +571,14 @@ void update_charging_control() {
         
         if (cv_time_complete || cc_time_complete) {
             Serial.println("[CHARGING] Charging complete condition met!");
+            
+            // STEP 1: Send 0 RPM command IMMEDIATELY when condition is met
+            Serial.println("[CHARGING] Sending 0 RPM command immediately...");
+            rs485_sendFrequencyCommand(0);  // Send 0 Hz
+            current_frequency = 0;
+            delay(10);  // Give RS485 time to send the command
+            
+            // STEP 2: Now do other things (logging, calculations, etc.)
             if (cv_time_complete) {
                 Serial.printf("[CHARGING] CV mode duration: %lu ms (%.2f minutes) >= 30 minutes\n",
                     cv_duration, cv_duration / 60000.0f);
@@ -603,17 +588,37 @@ void update_charging_control() {
                     cv_duration, cc_state_duration);
             }
             
-            // Send stop command to VFD
-            rs485_sendStopCommand();
-            Serial.println("[CHARGING] Stop command sent to VFD");
+            // Store final charging time and remaining time before transitioning
+            if (charging_start_time > 0) {
+                final_charging_time_ms = millis() - charging_start_time;
+                charging_complete = true;
+                Serial.printf("[CHARGING] Final charging time: %lu ms (%.2f minutes)\n", 
+                             final_charging_time_ms, final_charging_time_ms / 60000.0f);
+                
+                // Calculate and store final remaining time
+                if (cv_start_time > 0 && cc_state_duration_for_timer > 0) {
+                    unsigned long cv_elapsed = millis() - cv_start_time;
+                    unsigned long cv_33_percent_time = cc_state_duration_for_timer / 3;  // 33% of CC time
+                    unsigned long cv_30_min = 30 * 60 * 1000;  // 30 minutes in ms
+                    unsigned long target_cv_time = (cv_33_percent_time < cv_30_min) ? cv_33_percent_time : cv_30_min;
+                    final_remaining_time_ms = (target_cv_time > cv_elapsed) ? (target_cv_time - cv_elapsed) : 0;
+                    Serial.printf("[CHARGING] Final remaining time: %lu ms (%.2f minutes)\n", 
+                                 final_remaining_time_ms, final_remaining_time_ms / 60000.0f);
+                }
+            }
             
-            // Reset frequency to 0
-            current_frequency = 0;
-            Serial.println("[CHARGING] Frequency reset to 0");
+            // Open contactor via CAN bus (just before moving out of screen 5)
+            Serial.println("[CONTACTOR] Opening contactor before completing charge...");
+            send_contactor_control(CONTACTOR_OPEN);
             
             // Set stop reason and transition to complete state
             charge_stop_reason = CHARGE_STOP_COMPLETE;
             current_app_state = STATE_CHARGING_COMPLETE;
+            
+            // Set flag to send stop command after screen 6 loads
+            pending_stop_command = true;
+            
+            // STEP 3: Move to screen 6
             switch_to_screen(SCREEN_CHARGING_COMPLETE);
         }
     }
@@ -626,19 +631,6 @@ void update_current_screen() {
         update_screen1_wifi_status();
     }
     
-    // WiFi connection status updates only when on WiFi config screen
-    if (current_screen_id == SCREEN_WIFI_CONFIG) {
-        update_wifi_connection_status();
-        // Update WiFi info display to show BLE credentials if available
-        if (screen12_wifi_info != nullptr) {
-            if (ble_ssid.length() > 0 && ble_key.length() > 0) {
-                lv_label_set_text_fmt(screen12_wifi_info, "SSID: %s\nPassword: %s", ble_ssid.c_str(), ble_key.c_str());
-            } else {
-                lv_label_set_text_fmt(screen12_wifi_info, "SSID: %s\nPassword: %s", TEST_WIFI_SSID, TEST_WIFI_PASSWORD);
-            }
-        }
-    }
-    
     // Time debug display updates only when on time debug screen
     if (current_screen_id == SCREEN_TIME_DEBUG) {
         update_time_debug_display();
@@ -649,17 +641,11 @@ void update_current_screen() {
         update_ble_debug_display();
     }
     
-    // Refresh screen 11 profiles if needed (deferred to avoid blocking screen switch)
-    if (screen11_profiles_need_refresh && screen11_battery_container != nullptr && current_screen_id == SCREEN_BATTERY_PROFILES) {
-        screen11_profiles_need_refresh = false;
-        displayAllBatteryProfiles(screen11_battery_container);
-    }
-    
     // Charging control (runs only in charging states, once per second)
     update_charging_control();
     
-    // Update battery details on screen 3
-    if (current_screen_id == SCREEN_CHARGING_STARTED && screen3_battery_details_label != nullptr) {
+    // Update battery details on screens 3, 4, 5
+    if (screen3_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
         if (selected_battery_profile != nullptr) {
             char details_text[100];
             sprintf(details_text, "Selected Battery: %s (%dV, %dAh, %s)",
@@ -672,14 +658,116 @@ void update_current_screen() {
             lv_label_set_text(screen3_battery_details_label, "Selected Battery: None");
         }
     }
+    if (screen4_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
+        if (selected_battery_profile != nullptr) {
+            char details_text[100];
+            sprintf(details_text, "Selected Battery: %s (%dV, %dAh, %s)",
+                    selected_battery_profile->getDisplayName().c_str(),
+                    selected_battery_profile->getRatedVoltage(),
+                    selected_battery_profile->getRatedAh(),
+                    getBatteryChemistryName(selected_battery_profile));
+            lv_label_set_text(screen4_battery_details_label, details_text);
+        } else {
+            lv_label_set_text(screen4_battery_details_label, "Selected Battery: None");
+        }
+    }
+    if (screen5_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_CV) {
+        if (selected_battery_profile != nullptr) {
+            char details_text[100];
+            sprintf(details_text, "Selected Battery: %s (%dV, %dAh, %s)",
+                    selected_battery_profile->getDisplayName().c_str(),
+                    selected_battery_profile->getRatedVoltage(),
+                    selected_battery_profile->getRatedAh(),
+                    getBatteryChemistryName(selected_battery_profile));
+            lv_label_set_text(screen5_battery_details_label, details_text);
+        } else {
+            lv_label_set_text(screen5_battery_details_label, "Selected Battery: None");
+        }
+    }
+    
+    // Update timer displays on screens 3, 4, 5, 6, 7
+    lvgl_port_lock(-1);  // Lock LVGL for thread safety
+    
+    unsigned long total_elapsed = 0;
+    if (charging_complete && final_charging_time_ms > 0) {
+        // Use final time if charging is complete (stops updating)
+        total_elapsed = final_charging_time_ms;
+    } else if (charging_start_time > 0) {
+        // Calculate elapsed time if charging is in progress
+        total_elapsed = millis() - charging_start_time;
+    }
+    
+    if (total_elapsed > 0) {
+        unsigned long total_seconds = total_elapsed / 1000;
+        unsigned long total_minutes = total_seconds / 60;
+        unsigned long total_hours = total_minutes / 60;
+        total_seconds = total_seconds % 60;
+        total_minutes = total_minutes % 60;
+        
+        char time_str[20];
+        sprintf(time_str, "%02lu:%02lu:%02lu", total_hours, total_minutes, total_seconds);
+        
+        // Update total time on screens 3, 4, 5 (only if charging in progress)
+        if (!charging_complete) {
+            if (screen3_timer_table != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
+                lv_table_set_cell_value(screen3_timer_table, 1, 0, time_str);
+            }
+            if (screen4_timer_table != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
+                lv_table_set_cell_value(screen4_timer_table, 1, 0, time_str);
+            }
+            if (screen5_timer_table != nullptr && current_screen_id == SCREEN_CHARGING_CV) {
+                lv_table_set_cell_value(screen5_timer_table, 1, 0, time_str);
+                
+                // Also update remaining time on screen 5 (CV state)
+                if (cv_start_time > 0 && cc_state_duration_for_timer > 0) {
+                    unsigned long cv_elapsed = millis() - cv_start_time;
+                    unsigned long cv_33_percent_time = cc_state_duration_for_timer / 3;  // 33% of CC time
+                    unsigned long cv_30_min = 30 * 60 * 1000;  // 30 minutes in ms
+                    unsigned long target_cv_time = (cv_33_percent_time < cv_30_min) ? cv_33_percent_time : cv_30_min;
+                    unsigned long remaining_time_ms = (target_cv_time > cv_elapsed) ? (target_cv_time - cv_elapsed) : 0;
+                    
+                    unsigned long rem_seconds = remaining_time_ms / 1000;
+                    unsigned long rem_minutes = rem_seconds / 60;
+                    rem_seconds = rem_seconds % 60;
+                    sprintf(time_str, "%02lu:%02lu", rem_minutes, rem_seconds);
+                    lv_table_set_cell_value(screen5_timer_table, 1, 1, time_str);
+                } else {
+                    // If cv_start_time or cc_state_duration not set yet, show default
+                    if (cv_start_time == 0) {
+                        lv_table_set_cell_value(screen5_timer_table, 1, 1, "--:--");
+                    } else {
+                        lv_table_set_cell_value(screen5_timer_table, 1, 1, "00:00");
+                    }
+                }
+            }
+        }
+        
+        // Update final time on screens 6 and 7 (always show final time when complete)
+        if (screen6_timer_table != nullptr && current_screen_id == SCREEN_CHARGING_COMPLETE) {
+            lv_table_set_cell_value(screen6_timer_table, 1, 0, time_str);
+            
+            // Also display final remaining time on screen 6
+            if (final_remaining_time_ms > 0) {
+                unsigned long rem_seconds = final_remaining_time_ms / 1000;
+                unsigned long rem_minutes = rem_seconds / 60;
+                rem_seconds = rem_seconds % 60;
+                sprintf(time_str, "%02lu:%02lu", rem_minutes, rem_seconds);
+                lv_table_set_cell_value(screen6_timer_table, 1, 1, time_str);
+            } else {
+                lv_table_set_cell_value(screen6_timer_table, 1, 1, "00:00");
+            }
+        }
+        if (screen7_timer_table != nullptr && current_screen_id == SCREEN_EMERGENCY_STOP) {
+            lv_table_set_cell_value(screen7_timer_table, 1, 0, time_str);
+        }
+    }
+    
+    lvgl_port_unlock();  // Unlock LVGL
 }
 
 // Determine which screen should be shown based on current state
 screen_id_t determine_screen_from_state() {
     // Priority-based screen selection
-    if (wifi_config_requested) {
-        return SCREEN_WIFI_CONFIG;
-    }
     if (current_app_state == STATE_CHARGING_START) {
         return SCREEN_CHARGING_STARTED;
     }
@@ -694,9 +782,6 @@ screen_id_t determine_screen_from_state() {
     }
     if (current_app_state == STATE_EMERGENCY_STOP) {
         return SCREEN_EMERGENCY_STOP;
-    }
-    if (current_app_state == STATE_BATTERY_PROFILES) {
-        return SCREEN_BATTERY_PROFILES;
     }
     // Don't switch away from CAN debug screen based on voltage
     if (current_screen_id == SCREEN_CAN_DEBUG) {
@@ -731,7 +816,6 @@ void update_screen_based_on_state() {
 // ============================================================================
 
 // Forward declarations for event handlers
-void screen11_profile_selected_event_handler(lv_event_t * e);
 void screen2_profile_selected_event_handler(lv_event_t * e);
 
 // Display battery profiles matching the detected voltage range
@@ -781,12 +865,8 @@ void displayMatchingBatteryProfiles(float detectedVoltage, lv_obj_t* container) 
         lv_obj_set_style_border_width(profile_btn, 1, LV_PART_MAIN);
         lv_obj_set_style_border_color(profile_btn, lv_color_hex(0x808080), LV_PART_MAIN);
 
-        // Add event handler for profile selection - use different handler for screen2
-        if (container == screen2_battery_container) {
-            lv_obj_add_event_cb(profile_btn, screen2_profile_selected_event_handler, LV_EVENT_CLICKED, (void*)profile);
-        } else {
-            lv_obj_add_event_cb(profile_btn, screen11_profile_selected_event_handler, LV_EVENT_CLICKED, (void*)profile);
-        }
+        // Add event handler for profile selection
+        lv_obj_add_event_cb(profile_btn, screen2_profile_selected_event_handler, LV_EVENT_CLICKED, (void*)profile);
 
         // Create label with battery info
         lv_obj_t* profile_label = lv_label_create(profile_btn);
@@ -800,75 +880,6 @@ void displayMatchingBatteryProfiles(float detectedVoltage, lv_obj_t* container) 
         // Move to next button position
         button_y += button_height + button_spacing;
     }
-}
-
-// Display all available battery profiles in the specified container
-void displayAllBatteryProfiles(lv_obj_t* container) {
-    Serial.println("[BATTERY] displayAllBatteryProfiles() called");
-
-    if (!container) {
-        Serial.println("[ERROR] Battery list container not provided");
-        return;
-    }
-
-    // Lock LVGL before making UI changes
-    lvgl_port_lock(-1);
-
-    // Clear any existing content
-    lv_obj_clean(container);
-
-    // Make container visible
-    lv_obj_clear_flag(container, LV_OBJ_FLAG_HIDDEN);
-
-    int profileCount = batteryProfiles.getProfileCount();
-    Serial.printf("[BATTERY] Displaying all %d profiles\n", profileCount);
-
-    if (profileCount == 0) {
-        Serial.println("[BATTERY] No profiles found! Check if battery profiles are loaded.");
-        lv_obj_t* no_profiles_label = lv_label_create(container);
-        lv_label_set_text(no_profiles_label, "No battery profiles loaded!");
-        lv_obj_set_style_text_font(no_profiles_label, &lv_font_montserrat_20, LV_PART_MAIN);
-        lv_obj_set_style_text_color(no_profiles_label, lv_color_hex(0xFF0000), LV_PART_MAIN);
-        lv_obj_center(no_profiles_label);
-        lvgl_port_unlock();
-        return;
-    }
-
-    // Create a scrollable list of all battery profiles
-    int button_y = 10; // Start Y position for first button
-    const int button_height = 60;
-    const int button_spacing = 5;
-
-    for (int i = 0; i < batteryProfiles.getProfileCount(); i++) {
-        BatteryType* profile = batteryProfiles.getProfile(i);
-        if (!profile) continue;
-
-        // Create a button for each battery profile
-        lv_obj_t* profile_btn = lv_btn_create(container);
-        lv_obj_set_size(profile_btn, 900, button_height);
-        lv_obj_set_pos(profile_btn, 10, button_y); // Position with X=10, increasing Y
-        lv_obj_set_style_bg_color(profile_btn, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
-        lv_obj_set_style_border_width(profile_btn, 1, LV_PART_MAIN);
-        lv_obj_set_style_border_color(profile_btn, lv_color_hex(0x808080), LV_PART_MAIN);
-
-        // Add event handler for profile selection
-        lv_obj_add_event_cb(profile_btn, screen11_profile_selected_event_handler, LV_EVENT_CLICKED, (void*)profile);
-
-        // Create label with battery info
-        lv_obj_t* profile_label = lv_label_create(profile_btn);
-        lv_label_set_text(profile_label, profile->getDisplayName().c_str());
-        lv_obj_set_style_text_font(profile_label, &lv_font_montserrat_20, LV_PART_MAIN);
-        lv_obj_set_style_text_color(profile_label, lv_color_hex(0x000000), LV_PART_MAIN);
-        lv_obj_center(profile_label);
-
-        Serial.printf("[BATTERY] Added profile at Y=%d: %s\n", button_y, profile->getDisplayName().c_str());
-
-        // Move to next button position
-        button_y += button_height + button_spacing;
-    }
-
-    // Unlock LVGL after UI changes
-    lvgl_port_unlock();
 }
 
 // ============================================================================
@@ -940,11 +951,7 @@ void update_wifi_connection_status() {
         Serial.printf("[WIFI] Connected to: %s\n", TEST_WIFI_SSID);
         Serial.printf("[WIFI] IP Address: %s\n", WiFi.localIP().toString().c_str());
 
-        // Update UI to show connected status
-        if (screen12_connection_status != nullptr) {
-            lv_label_set_text(screen12_connection_status, "WiFi Connected Successfully!");
-            lv_obj_set_style_text_color(screen12_connection_status, lv_color_hex(0x00AA00), LV_PART_MAIN);  // Green for success
-        }
+        // WiFi connected successfully (no UI update needed since screen 12 is removed)
 
         wifi_connection_in_progress = false;
         wifi_connection_attempts = 0;
@@ -956,11 +963,7 @@ void update_wifi_connection_status() {
         Serial.println("[WIFI] Connection failed!");
         Serial.printf("[WIFI] WiFi status: %d\n", wifi_status);
 
-        // Update UI to show failure status
-        if (screen12_connection_status != nullptr) {
-            lv_label_set_text(screen12_connection_status, "WiFi Connection Failed!");
-            lv_obj_set_style_text_color(screen12_connection_status, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red for failure
-        }
+        // WiFi connection failed (no UI update needed since screen 12 is removed)
 
         wifi_connection_in_progress = false;
         wifi_connection_attempts = 0;
@@ -976,13 +979,7 @@ void update_wifi_connection_status() {
         // Print serial progress
         Serial.printf("[WIFI] Connection attempt %d/%d...\n", wifi_connection_attempts, WIFI_MAX_ATTEMPTS);
 
-        // Update LVGL label with progress
-        if (screen12_connection_status != nullptr) {
-            char status_text[60];
-            sprintf(status_text, "Connecting to WiFi (%d/%d)", wifi_connection_attempts, WIFI_MAX_ATTEMPTS);
-            lv_label_set_text(screen12_connection_status, status_text);
-            lv_obj_set_style_text_color(screen12_connection_status, lv_color_hex(0x00AA00), LV_PART_MAIN);  // Green
-        }
+        // WiFi connection progress (no UI update needed since screen 12 is removed)
     }
 }
 
@@ -1157,30 +1154,6 @@ void process_reboot_countdown(void) {
 // Event Handlers
 // ============================================================================
 
-// Screen 1 battery profiles button event handler
-void screen1_bat_profiles_event_handler(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        Serial.println("[SCREEN] Switching to battery profiles screen");
-        // Update state and switch screen
-        current_app_state = STATE_BATTERY_PROFILES;
-        wifi_config_requested = false; // Clear other state flags
-        switch_to_screen(SCREEN_BATTERY_PROFILES);
-    }
-}
-
-// Screen 1 WiFi button event handler
-void screen1_wifi_event_handler(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        Serial.println("[SCREEN] Switching to WiFi config screen");
-        // Update state and switch screen
-        current_app_state = STATE_WIFI_CONFIG;
-        wifi_config_requested = true;
-        switch_to_screen(SCREEN_WIFI_CONFIG);
-    }
-}
-
 // Screen 1 CAN Debug button event handler
 void screen1_can_debug_btnhandler(lv_event_t * e) {
     lv_event_code_t code = lv_event_get_code(e);
@@ -1270,6 +1243,10 @@ void screen2_start_button_event_handler(lv_event_t * e) {
     if(code == LV_EVENT_CLICKED) {
         Serial.println("[SCREEN2] START button pressed - switching to charging screen");
 
+        // Close contactor via CAN bus (M1 -> M2)
+        Serial.println("[CONTACTOR] Closing contactor before starting charge...");
+        send_contactor_control(CONTACTOR_CLOSE);
+        
         // Send RS485 start command to VFD
         rs485_sendStartCommand();
         Serial.println("Start cmd sent to vfd, going to scrn3 now.");
@@ -1280,6 +1257,14 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         cc_state_start_time = 0;  // Reset CC timing
         cv_state_start_time = 0;  // Reset CV timing
         cc_state_duration = 0;    // Reset CC duration
+        cc_state_duration_for_timer = 0;  // Reset for timer calculation
+        
+        // Initialize charging start time and reset completion flag
+        charging_start_time = millis();
+        charging_complete = false;
+        final_charging_time_ms = 0;
+        final_remaining_time_ms = 0;
+        pending_stop_command = false;  // Reset stop command flag
 
         // Switch to charging start state
         current_app_state = STATE_CHARGING_START;
@@ -1305,130 +1290,13 @@ void screen2_reselect_button_event_handler(lv_event_t * e) {
     }
 }
 
-// screen 11 event handlers
-void screen11_profile_selected_event_handler(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    Serial.printf("[SCREEN11] Event handler called, code: %d\n", code);
-
-    if(code == LV_EVENT_CLICKED) {
-        BatteryType* selected_profile = (BatteryType*)lv_event_get_user_data(e);
-        if (selected_profile) {
-            Serial.printf("[SCREEN11] Profile selected: %s\n", selected_profile->getDisplayName().c_str());
-
-            // Update confirmation popup with selected profile details
-            lv_label_set_text_fmt(screen11_confirm_voltage_label, "Voltage: %d V", selected_profile->getRatedVoltage());
-            lv_label_set_text_fmt(screen11_confirm_capacity_label, "Capacity: %d Ah", selected_profile->getRatedAh());
-            lv_label_set_text_fmt(screen11_confirm_current_label, "Current: %.1f A", selected_profile->getConstCurrent());
-            lv_label_set_text_fmt(screen11_confirm_type_label, "Type: %s", getBatteryChemistryName(selected_profile));
-
-            // Show confirmation popup and bring it to foreground
-            lv_obj_clear_flag(screen11_confirm_popup, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(screen11_confirm_popup);
-        }
-    }
-}
-
-void screen11_stop_button_event_handler(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        Serial.println("[SCREEN11] STOP button pressed");
-        // TODO: Implement stop functionality
-    }
-}
-
-void screen11_start_button_event_handler(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        Serial.println("[SCREEN11] START button pressed");
-        // TODO: Implement start functionality
-    }
-}
-
-void screen11_confirm_agree_event_handler(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        Serial.println("[SCREEN11] CONFIRM AGREE button pressed - sending CAN test frame");
-
-        // Send CAN test frame with ID 0x100 (256 decimal)
-        uint8_t test_data[8] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
-        if (send_can_frame(HANDSHAKE_FRAME_ID, test_data, 8)) {
-            Serial.println("[CAN] Test frame sent successfully");
-        } else {
-            Serial.println("[CAN] Failed to send test frame");
-        }
-
-        // Hide the confirmation popup
-        lv_obj_add_flag(screen11_confirm_popup, LV_OBJ_FLAG_HIDDEN);
-    }
-}
-
-void screen11_confirm_change_event_handler(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        Serial.println("[SCREEN11] CONFIRM CHANGE button pressed - testing only");
-        // Hide the confirmation popup (testing functionality)
-        lv_obj_add_flag(screen11_confirm_popup, LV_OBJ_FLAG_HIDDEN);
-    }
-}
-
-// screen 11 back button event handler (battery profiles)
-void screen11_back_button_event_handler(lv_event_t * e) {
+// Generic back button event handler (used on screens 13, 16, 17)
+void generic_back_button_event_handler(lv_event_t * e) {
     lv_event_code_t code = lv_event_get_code(e);
     if(code == LV_EVENT_CLICKED) {
         Serial.println("[SCREEN] BACK button pressed - returning to home screen");
         // Reset state and return to home
         current_app_state = STATE_HOME;
-        wifi_config_requested = false;
-        switch_to_screen(SCREEN_HOME);
-    }
-}
-
-// Screen 12 Connect button event handler
-void screen12_connect_event_handler(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        Serial.println("[WIFI] Connect button pressed - starting WiFi connection");
-        
-        // Use BLE credentials if available, otherwise fall back to defaults
-        const char* ssid_to_use;
-        const char* password_to_use;
-        
-        if (ble_ssid.length() > 0 && ble_key.length() > 0) {
-            ssid_to_use = ble_ssid.c_str();
-            password_to_use = ble_key.c_str();
-            Serial.println("[WIFI] Using credentials received via BLE");
-        } else {
-            ssid_to_use = TEST_WIFI_SSID;
-            password_to_use = TEST_WIFI_PASSWORD;
-            Serial.println("[WIFI] Using default credentials (no BLE credentials available)");
-        }
-        
-        Serial.printf("[WIFI] Attempting to connect to SSID: %s\n", ssid_to_use);
-
-        // Start asynchronous WiFi connection
-        WiFi.begin(ssid_to_use, password_to_use);
-
-        // Set connection state
-        wifi_connection_in_progress = true;
-        wifi_connection_start_time = millis();
-        wifi_connection_attempts = 0;
-
-        // Initial UI update
-        if (screen12_connection_status != nullptr) {
-            lv_label_set_text(screen12_connection_status, "Connecting to WiFi...");
-            lv_obj_set_style_text_color(screen12_connection_status, lv_color_hex(0x00AA00), LV_PART_MAIN);  // Green
-        }
-    }
-}
-
-// screen 12 back button event handler (WiFi config)
-void screen12_back_button_event_handler(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        Serial.println("[SCREEN] BACK button pressed - returning to home screen");
-        // Reset state and return to home
-        current_app_state = STATE_HOME;
-        wifi_config_requested = false;
         switch_to_screen(SCREEN_HOME);
     }
 }
@@ -1439,18 +1307,42 @@ void emergency_stop_event_handler(lv_event_t * e) {
     if(code == LV_EVENT_CLICKED) {
         Serial.println("[EMERGENCY] Emergency stop button pressed!");
         
-        // Send RS485 stop command to VFD
-        rs485_sendStopCommand();
-        Serial.println("[EMERGENCY] Stop command sent to VFD");
-        
-        // Reset frequency to 0
+        // STEP 1: Send 0 RPM command IMMEDIATELY in button callback (100% triggers)
+        Serial.println("[EMERGENCY] Sending 0 RPM command immediately in button callback...");
+        rs485_sendFrequencyCommand(0);  // Send 0 Hz
         current_frequency = 0;
-        Serial.println("[EMERGENCY] Frequency reset to 0");
+        delay(10);  // Give RS485 time to send the command
+        
+        // Open contactor via CAN bus IMMEDIATELY on emergency stop
+        Serial.println("[CONTACTOR] Opening contactor immediately on emergency stop...");
+        send_contactor_control(CONTACTOR_OPEN);
+        
+        // Store final charging time and remaining time before transitioning (if charging was in progress)
+        if (charging_start_time > 0 && !charging_complete) {
+            final_charging_time_ms = millis() - charging_start_time;
+            charging_complete = true;
+            Serial.printf("[EMERGENCY] Final charging time: %lu ms (%.2f minutes)\n", 
+                         final_charging_time_ms, final_charging_time_ms / 60000.0f);
+            
+            // Calculate and store final remaining time (if in CV state)
+            if (cv_start_time > 0 && cc_state_duration_for_timer > 0) {
+                unsigned long cv_elapsed = millis() - cv_start_time;
+                unsigned long cv_33_percent_time = cc_state_duration_for_timer / 3;  // 33% of CC time
+                unsigned long cv_30_min = 30 * 60 * 1000;  // 30 minutes in ms
+                unsigned long target_cv_time = (cv_33_percent_time < cv_30_min) ? cv_33_percent_time : cv_30_min;
+                final_remaining_time_ms = (target_cv_time > cv_elapsed) ? (target_cv_time - cv_elapsed) : 0;
+                Serial.printf("[EMERGENCY] Final remaining time: %lu ms (%.2f minutes)\n", 
+                             final_remaining_time_ms, final_remaining_time_ms / 60000.0f);
+            }
+        }
         
         // Set stop reason
         charge_stop_reason = CHARGE_STOP_EMERGENCY;
         
-        // Switch to emergency stop state and screen
+        // Set flag to send stop command after screen 7 loads
+        pending_stop_command = true;
+        
+        // STEP 2: Switch to emergency stop state and screen
         current_app_state = STATE_EMERGENCY_STOP;
         switch_to_screen(SCREEN_EMERGENCY_STOP);
     }
@@ -1464,6 +1356,12 @@ void home_button_event_handler(lv_event_t * e) {
         
         // Reset stop reason
         charge_stop_reason = CHARGE_STOP_NONE;
+        
+        // Reset timer variables
+        charging_start_time = 0;
+        cv_start_time = 0;
+        cc_state_duration_for_timer = 0;
+        pending_stop_command = false;  // Reset stop command flag
         
         // Check if battery is still connected
         if (battery_detected && sensorData.volt >= 9.0f) {
@@ -1522,14 +1420,14 @@ void create_screen_1()
         lv_table_set_col_width(data_table, 0, 198);  // Volt
         lv_table_set_col_width(data_table, 1, 198);  // Curr
         lv_table_set_col_width(data_table, 2, 198);  // Temp1
-        lv_table_set_col_width(data_table, 3, 198);  // Freq
+        lv_table_set_col_width(data_table, 3, 198);  // Rpm
         lv_table_set_col_width(data_table, 4, 198);  // Entry
 
         // Headers (Row 0)
         lv_table_set_cell_value(data_table, 0, 0, "Volt");
         lv_table_set_cell_value(data_table, 0, 1, "Curr");
         lv_table_set_cell_value(data_table, 0, 2, "Temp1");
-        lv_table_set_cell_value(data_table, 0, 3, "Freq");
+        lv_table_set_cell_value(data_table, 0, 3, "Rpm");
         lv_table_set_cell_value(data_table, 0, 4, "Entry");
 
         // Values (Row 1)
@@ -1571,33 +1469,7 @@ void create_screen_1()
     lv_obj_set_flex_align(screen1_button_container, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(screen1_button_container, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Battery Profiles button
-    lv_obj_t* screen1_bat_profiles_btn = lv_btn_create(screen1_button_container);
-    lv_obj_set_size(screen1_bat_profiles_btn, 300, 80);
-    lv_obj_set_style_bg_color(screen1_bat_profiles_btn, lv_color_hex(0x4A90E2), LV_PART_MAIN);  // Blue button
-    lv_obj_add_event_cb(screen1_bat_profiles_btn, screen1_bat_profiles_event_handler, LV_EVENT_CLICKED, NULL);
-    lv_obj_clear_flag(screen1_bat_profiles_btn, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t* screen1_bat_profiles_label = lv_label_create(screen1_bat_profiles_btn);
-    lv_label_set_text(screen1_bat_profiles_label, "Bat Profiles");
-    lv_obj_set_style_text_font(screen1_bat_profiles_label, &lv_font_montserrat_20, LV_PART_MAIN);
-    lv_obj_set_style_text_color(screen1_bat_profiles_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
-    lv_obj_center(screen1_bat_profiles_label);
-
-    // WiFi button (next to battery profiles button)
-    lv_obj_t* screen1_wifi_btn = lv_btn_create(screen1_button_container);
-    lv_obj_set_size(screen1_wifi_btn, 300, 80);
-    lv_obj_set_style_bg_color(screen1_wifi_btn, lv_color_hex(0x228B22), LV_PART_MAIN);  // Green button
-    lv_obj_add_event_cb(screen1_wifi_btn, screen1_wifi_event_handler, LV_EVENT_CLICKED, NULL);
-    lv_obj_clear_flag(screen1_wifi_btn, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t* screen1_wifi_label = lv_label_create(screen1_wifi_btn);
-    lv_label_set_text(screen1_wifi_label, "WiFi Config");
-    lv_obj_set_style_text_font(screen1_wifi_label, &lv_font_montserrat_20, LV_PART_MAIN);
-    lv_obj_set_style_text_color(screen1_wifi_label, lv_color_hex(0xFFFFA0), LV_PART_MAIN);  // White text
-    lv_obj_center(screen1_wifi_label);
-
-    // CAN Debug button (next to WiFi button)
+    // CAN Debug button
     lv_obj_t* screen1_can_debug_btn = lv_btn_create(screen1_button_container);
     lv_obj_set_size(screen1_can_debug_btn, 300, 80);
     lv_obj_set_style_bg_color(screen1_can_debug_btn, lv_color_hex(0xFFA500), LV_PART_MAIN);  // Orange button
@@ -1661,7 +1533,7 @@ void create_screen_1()
 
 //screen 2 - battery detected, charge ready page
 void create_screen_2(void) {
-    // Create screen 2 (similar to screen 11 but with filtered battery list)
+    // Create screen 2 (battery detected screen with filtered battery list)
     screen_2 = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(screen_2, lv_color_hex(0xDDA0DD), LV_PART_MAIN);  // Light purple background
     lv_obj_set_style_bg_opa(screen_2, LV_OPA_COVER, LV_PART_MAIN);
@@ -1840,12 +1712,27 @@ void create_screen_3(void) {
         lv_obj_set_pos(data_table, 12, 110);
     }
 
-    // Battery profile details label (below table)
+    // Battery profile details label (below table, moved up 50px)
     screen3_battery_details_label = lv_label_create(screen_3);
     lv_label_set_text(screen3_battery_details_label, "Selected Battery: --");
     lv_obj_set_style_text_color(screen3_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen3_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen3_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 350);  // Below table
+    lv_obj_align(screen3_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 300);  // Moved up 50px (350 -> 300)
+    
+    // Timer table (2x2) for screen 3 - below battery label, left aligned
+    screen3_timer_table = lv_table_create(screen_3);
+    lv_table_set_col_cnt(screen3_timer_table, 2);
+    lv_table_set_row_cnt(screen3_timer_table, 2);
+    lv_table_set_col_width(screen3_timer_table, 0, 200);
+    lv_table_set_col_width(screen3_timer_table, 1, 200);
+    lv_table_set_cell_value(screen3_timer_table, 0, 0, "Total Time");
+    lv_table_set_cell_value(screen3_timer_table, 0, 1, "");
+    lv_table_set_cell_value(screen3_timer_table, 1, 0, "00:00:00");
+    lv_table_set_cell_value(screen3_timer_table, 1, 1, "");
+    lv_obj_set_style_bg_color(screen3_timer_table, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen3_timer_table, &lv_font_montserrat_20, LV_PART_ITEMS);
+    lv_obj_align(screen3_timer_table, LV_ALIGN_TOP_LEFT, 12, 360);  // Below battery label, left aligned
+    lv_obj_clear_flag(screen3_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 3
     createM2StateBox(screen_3, "screen_3");
@@ -1898,12 +1785,27 @@ void create_screen_4(void) {
         lv_obj_set_pos(data_table, 12, 110);
     }
 
-    // Battery profile details label (below table)
-    lv_obj_t* screen4_battery_details_label = lv_label_create(screen_4);
+    // Battery profile details label (below table, moved up 50px)
+    screen4_battery_details_label = lv_label_create(screen_4);
     lv_label_set_text(screen4_battery_details_label, "Selected Battery: --");
     lv_obj_set_style_text_color(screen4_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen4_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen4_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 350);  // Below table
+    lv_obj_align(screen4_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 300);  // Moved up 50px (350 -> 300)
+    
+    // Timer table (2x2) for screen 4 - below battery label, left aligned
+    screen4_timer_table = lv_table_create(screen_4);
+    lv_table_set_col_cnt(screen4_timer_table, 2);
+    lv_table_set_row_cnt(screen4_timer_table, 2);
+    lv_table_set_col_width(screen4_timer_table, 0, 200);
+    lv_table_set_col_width(screen4_timer_table, 1, 200);
+    lv_table_set_cell_value(screen4_timer_table, 0, 0, "Total Time");
+    lv_table_set_cell_value(screen4_timer_table, 0, 1, "");
+    lv_table_set_cell_value(screen4_timer_table, 1, 0, "00:00:00");
+    lv_table_set_cell_value(screen4_timer_table, 1, 1, "");
+    lv_obj_set_style_bg_color(screen4_timer_table, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen4_timer_table, &lv_font_montserrat_20, LV_PART_ITEMS);
+    lv_obj_align(screen4_timer_table, LV_ALIGN_TOP_LEFT, 12, 360);  // Below battery label, left aligned
+    lv_obj_clear_flag(screen4_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 4
     createM2StateBox(screen_4, "screen_4");
@@ -1955,12 +1857,27 @@ void create_screen_5(void) {
         lv_obj_set_pos(data_table, 12, 110);
     }
 
-    // Battery profile details label (below table)
-    lv_obj_t* screen5_battery_details_label = lv_label_create(screen_5);
+    // Battery profile details label (below table, moved up 50px)
+    screen5_battery_details_label = lv_label_create(screen_5);
     lv_label_set_text(screen5_battery_details_label, "Selected Battery: --");
     lv_obj_set_style_text_color(screen5_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen5_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen5_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 350);  // Below table
+    lv_obj_align(screen5_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 300);  // Moved up 50px (350 -> 300)
+    
+    // Timer table (2x2) for screen 5 - shows total time and remaining time, below battery label, left aligned
+    screen5_timer_table = lv_table_create(screen_5);
+    lv_table_set_col_cnt(screen5_timer_table, 2);
+    lv_table_set_row_cnt(screen5_timer_table, 2);
+    lv_table_set_col_width(screen5_timer_table, 0, 200);
+    lv_table_set_col_width(screen5_timer_table, 1, 200);
+    lv_table_set_cell_value(screen5_timer_table, 0, 0, "Total Time");
+    lv_table_set_cell_value(screen5_timer_table, 0, 1, "Remaining");
+    lv_table_set_cell_value(screen5_timer_table, 1, 0, "00:00:00");
+    lv_table_set_cell_value(screen5_timer_table, 1, 1, "00:00");
+    lv_obj_set_style_bg_color(screen5_timer_table, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen5_timer_table, &lv_font_montserrat_20, LV_PART_ITEMS);
+    lv_obj_align(screen5_timer_table, LV_ALIGN_TOP_LEFT, 12, 360);  // Below battery label, left aligned
+    lv_obj_clear_flag(screen5_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 5
     createM2StateBox(screen_5, "screen_5");
@@ -2011,6 +1928,21 @@ void create_screen_6(void) {
         lv_obj_set_parent(data_table, screen_6);
         lv_obj_set_pos(data_table, 12, 110);
     }
+    
+    // Timer table (2x2) for screen 6 - shows total time and remaining time, left aligned
+    screen6_timer_table = lv_table_create(screen_6);
+    lv_table_set_col_cnt(screen6_timer_table, 2);
+    lv_table_set_row_cnt(screen6_timer_table, 2);
+    lv_table_set_col_width(screen6_timer_table, 0, 200);
+    lv_table_set_col_width(screen6_timer_table, 1, 200);
+    lv_table_set_cell_value(screen6_timer_table, 0, 0, "Total Time");
+    lv_table_set_cell_value(screen6_timer_table, 0, 1, "Remaining");
+    lv_table_set_cell_value(screen6_timer_table, 1, 0, "00:00:00");
+    lv_table_set_cell_value(screen6_timer_table, 1, 1, "00:00");
+    lv_obj_set_style_bg_color(screen6_timer_table, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen6_timer_table, &lv_font_montserrat_20, LV_PART_ITEMS);
+    lv_obj_align(screen6_timer_table, LV_ALIGN_TOP_LEFT, 12, 300);  // Left aligned, moved up
+    lv_obj_clear_flag(screen6_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 6
     createM2StateBox(screen_6, "screen_6");
@@ -2061,6 +1993,21 @@ void create_screen_7(void) {
         lv_obj_set_parent(data_table, screen_7);
         lv_obj_set_pos(data_table, 12, 110);
     }
+    
+    // Timer table (2x2) for screen 7 - shows total time, left aligned
+    screen7_timer_table = lv_table_create(screen_7);
+    lv_table_set_col_cnt(screen7_timer_table, 2);
+    lv_table_set_row_cnt(screen7_timer_table, 2);
+    lv_table_set_col_width(screen7_timer_table, 0, 200);
+    lv_table_set_col_width(screen7_timer_table, 1, 200);
+    lv_table_set_cell_value(screen7_timer_table, 0, 0, "Total Time");
+    lv_table_set_cell_value(screen7_timer_table, 0, 1, "");
+    lv_table_set_cell_value(screen7_timer_table, 1, 0, "00:00:00");
+    lv_table_set_cell_value(screen7_timer_table, 1, 1, "");
+    lv_obj_set_style_bg_color(screen7_timer_table, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen7_timer_table, &lv_font_montserrat_20, LV_PART_ITEMS);
+    lv_obj_align(screen7_timer_table, LV_ALIGN_TOP_LEFT, 12, 300);  // Left aligned, moved up
+    lv_obj_clear_flag(screen7_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 7
     createM2StateBox(screen_7, "screen_7");
@@ -2083,242 +2030,6 @@ void create_screen_7(void) {
 }
 
 
-//screen 11 , confirmation etc
-void create_screen_11(void) {
-    screen_11 = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(screen_11, lv_color_hex(0xADD8E6), LV_PART_MAIN);  // Light blue background
-    lv_obj_set_style_bg_opa(screen_11, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_opa(screen_11, LV_OPA_COVER, LV_PART_MAIN);
-
-    // v4.09: Screen NOT scrollable (fixed layout)
-    lv_obj_set_scroll_dir(screen_11, LV_DIR_NONE);  // No scrolling
-
-    // Title
-    lv_obj_t *title = lv_label_create(screen_11);
-    lv_label_set_text(title, "GCU 3kW Charger v1.0");
-    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
-
-    // Status label (battery detected, etc)
-    status_label = lv_label_create(screen_11);
-    lv_label_set_text(status_label, "Available profiles.");
-    lv_obj_set_style_text_color(status_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red for visibility
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_align(status_label, LV_ALIGN_TOP_MID, 0, 60);
-
-    // Move shared data table to screen_11
-    if (data_table != nullptr) {
-        lv_obj_set_parent(data_table, screen_11);
-        lv_obj_set_pos(data_table, 12, 110);
-    }
-    
-    // v4.08: Battery list container (shown with all profiles on screen 11)
-    screen11_battery_container = lv_obj_create(screen_11);
-    lv_obj_set_size(screen11_battery_container, 950, 280);
-    lv_obj_set_pos(screen11_battery_container, 37, 260);  // Below table
-    lv_obj_set_style_bg_color(screen11_battery_container, lv_color_hex(0xF0F0F0), LV_PART_MAIN);
-    lv_obj_set_style_border_width(screen11_battery_container, 2, LV_PART_MAIN);
-    lv_obj_set_scroll_dir(screen11_battery_container, LV_DIR_VER);  // Vertical scroll
-    lv_obj_add_flag(screen11_battery_container, LV_OBJ_FLAG_HIDDEN);  // Hidden initially, shown by screen manager
-
-    // v4.08: Button container (hidden by default, shown after profile selection)
-    screen11_button_container = lv_obj_create(screen_11);
-    lv_obj_set_size(screen11_button_container, ESP_PANEL_BOARD_WIDTH, 100);
-    lv_obj_align(screen11_button_container, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(screen11_button_container, lv_color_hex(0x87CEEB), LV_PART_MAIN);
-    lv_obj_set_style_border_width(screen11_button_container, 0, LV_PART_MAIN);
-    lv_obj_set_flex_flow(screen11_button_container, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(screen11_button_container, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_add_flag(screen11_button_container, LV_OBJ_FLAG_HIDDEN);  // Hidden initially
-    lv_obj_clear_flag(screen11_button_container, LV_OBJ_FLAG_SCROLLABLE);  // v4.26: Disable scrolling
-
-    // STOP button (in button_container)
-    screen11_stop_button = lv_btn_create(screen11_button_container);
-    lv_obj_set_size(screen11_stop_button, 300, 80);
-    lv_obj_set_style_bg_color(screen11_stop_button, lv_color_hex(0xFF0000), LV_PART_MAIN);
-    lv_obj_add_event_cb(screen11_stop_button, screen11_stop_button_event_handler, LV_EVENT_CLICKED, NULL);
-    lv_obj_clear_flag(screen11_stop_button, LV_OBJ_FLAG_SCROLLABLE);  // v4.26: Disable scrolling
-    lv_obj_t *screen11_stop_label = lv_label_create(screen11_stop_button);
-    lv_label_set_text(screen11_stop_label, "STOP");
-    lv_obj_set_style_text_font(screen11_stop_label, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_center(screen11_stop_label);
-
-    // START button (in button_container)
-    screen11_start_button = lv_btn_create(screen11_button_container);
-    lv_obj_set_size(screen11_start_button, 300, 80);
-    lv_obj_set_style_bg_color(screen11_start_button, lv_color_hex(0x00AA00), LV_PART_MAIN);
-    lv_obj_add_event_cb(screen11_start_button, screen11_start_button_event_handler, LV_EVENT_CLICKED, NULL);
-    lv_obj_clear_flag(screen11_start_button, LV_OBJ_FLAG_SCROLLABLE);  // v4.26: Disable scrolling
-    lv_obj_t *screen11_start_label = lv_label_create(screen11_start_button);
-    lv_label_set_text(screen11_start_label, "START");
-    lv_obj_set_style_text_font(screen11_start_label, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_center(screen11_start_label);
-
-    // Add M2 state status box - screen 11
-    createM2StateBox(screen_11, "screen_11");
-
-    // Add back button (top right)
-    screen11_back_btn = lv_btn_create(screen_11);
-    lv_obj_set_size(screen11_back_btn, 100, 50);
-    lv_obj_align(screen11_back_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
-    lv_obj_set_style_bg_color(screen11_back_btn, lv_color_hex(0xFF4444), LV_PART_MAIN);  // Red back button
-    lv_obj_add_event_cb(screen11_back_btn, screen11_back_button_event_handler, LV_EVENT_CLICKED, NULL);
-    lv_obj_t* back_label = lv_label_create(screen11_back_btn);
-    lv_label_set_text(back_label, "BACK");
-    lv_obj_set_style_text_font(back_label, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-    lv_obj_center(back_label);
-
-    // v4.60: Create confirmation popup (light gray background, multiple labels for different fonts)
-    screen11_confirm_popup = lv_obj_create(screen_11);
-    lv_obj_set_size(screen11_confirm_popup, 750, 500);
-    lv_obj_center(screen11_confirm_popup);
-    lv_obj_set_style_bg_color(screen11_confirm_popup, lv_color_hex(0xD3D3D3), LV_PART_MAIN);  // Light gray background
-    lv_obj_set_style_border_width(screen11_confirm_popup, 4, LV_PART_MAIN);
-    lv_obj_set_style_border_color(screen11_confirm_popup, lv_color_hex(0x000000), LV_PART_MAIN);  // Black border
-    lv_obj_set_style_radius(screen11_confirm_popup, 15, LV_PART_MAIN);
-    lv_obj_add_flag(screen11_confirm_popup, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
-
-    // Title label
-    screen11_confirm_title_label = lv_label_create(screen11_confirm_popup);
-    lv_label_set_text(screen11_confirm_title_label, "Confirm Battery:");
-    lv_obj_set_style_text_font(screen11_confirm_title_label, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_set_style_text_color(screen11_confirm_title_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen11_confirm_title_label, LV_ALIGN_TOP_MID, 0, 20);
-
-    // Voltage label (30pt - large and bold-looking)
-    screen11_confirm_voltage_label = lv_label_create(screen11_confirm_popup);
-    lv_label_set_text(screen11_confirm_voltage_label, "Voltage: -- V");
-    lv_obj_set_style_text_font(screen11_confirm_voltage_label, &lv_font_montserrat_30, LV_PART_MAIN);
-    lv_obj_set_style_text_color(screen11_confirm_voltage_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen11_confirm_voltage_label, LV_ALIGN_TOP_MID, 0, 80);
-
-    // Capacity label (30pt - large and bold-looking)
-    screen11_confirm_capacity_label = lv_label_create(screen11_confirm_popup);
-    lv_label_set_text(screen11_confirm_capacity_label, "Capacity: -- Ah");
-    lv_obj_set_style_text_font(screen11_confirm_capacity_label, &lv_font_montserrat_30, LV_PART_MAIN);
-    lv_obj_set_style_text_color(screen11_confirm_capacity_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen11_confirm_capacity_label, LV_ALIGN_TOP_MID, 0, 140);
-
-    // Current label (26pt)
-    screen11_confirm_current_label = lv_label_create(screen11_confirm_popup);
-    lv_label_set_text(screen11_confirm_current_label, "Current: -- A");
-    lv_obj_set_style_text_font(screen11_confirm_current_label, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_set_style_text_color(screen11_confirm_current_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen11_confirm_current_label, LV_ALIGN_TOP_MID, 0, 210);
-
-    // Type label (26pt)
-    screen11_confirm_type_label = lv_label_create(screen11_confirm_popup);
-    lv_label_set_text(screen11_confirm_type_label, "Type: --");
-    lv_obj_set_style_text_font(screen11_confirm_type_label, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_set_style_text_color(screen11_confirm_type_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen11_confirm_type_label, LV_ALIGN_TOP_MID, 0, 270);
-
-    // AGREE button
-    screen11_confirm_agree_btn = lv_btn_create(screen11_confirm_popup);
-    lv_obj_set_size(screen11_confirm_agree_btn, 300, 90);  // Bigger buttons
-    lv_obj_align(screen11_confirm_agree_btn, LV_ALIGN_BOTTOM_LEFT, 30, -30);
-    lv_obj_set_style_bg_color(screen11_confirm_agree_btn, lv_color_hex(0x00AA00), LV_PART_MAIN);  // Green
-    lv_obj_add_event_cb(screen11_confirm_agree_btn, screen11_confirm_agree_event_handler, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *screen11_agree_label = lv_label_create(screen11_confirm_agree_btn);
-    lv_label_set_text(screen11_agree_label, "AGREE");
-    lv_obj_set_style_text_font(screen11_agree_label, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_center(screen11_agree_label);
-
-    // CHANGE button
-    screen11_confirm_change_btn = lv_btn_create(screen11_confirm_popup);
-    lv_obj_set_size(screen11_confirm_change_btn, 300, 90);  // Bigger buttons
-    lv_obj_align(screen11_confirm_change_btn, LV_ALIGN_BOTTOM_RIGHT, -30, -30);
-    lv_obj_set_style_bg_color(screen11_confirm_change_btn, lv_color_hex(0xFF6600), LV_PART_MAIN);  // Orange
-    lv_obj_add_event_cb(screen11_confirm_change_btn, screen11_confirm_change_event_handler, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *screen11_change_label = lv_label_create(screen11_confirm_change_btn);
-    lv_label_set_text(screen11_change_label, "CHANGE");
-    lv_obj_set_style_text_font(screen11_change_label, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_center(screen11_change_label);
-
-    // Display all available battery profiles
-    displayAllBatteryProfiles(screen11_battery_container);
-
-    // Note: Screen loading is handled by switch_to_screen()
-    // lv_scr_load(screen_11); // Removed - handled by screen manager
-
-    Serial.println("[SCREEN] Screen 11 created successfully");
-}
-
-//screen 12 - wifi configs
-void create_screen_12(void) {
-    screen_12 = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(screen_12, lv_color_hex(0xADD8E6), LV_PART_MAIN);  // Light blue background
-    lv_obj_set_style_bg_opa(screen_12, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_opa(screen_12, LV_OPA_COVER, LV_PART_MAIN);
-
-    // v4.09: Screen NOT scrollable (fixed layout)
-    lv_obj_set_scroll_dir(screen_12, LV_DIR_NONE);  // No scrolling
-
-    // Title
-    lv_obj_t *title = lv_label_create(screen_12);
-    lv_label_set_text(title, "WiFi Configs");
-    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
-
-    // Status label
-    lv_obj_t *status_label = lv_label_create(screen_12);
-    lv_label_set_text(status_label, "Test WiFi Connection");
-    lv_obj_set_style_text_color(status_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red for visibility
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_align(status_label, LV_ALIGN_TOP_MID, 0, 60);
-
-    // WiFi info display
-    screen12_wifi_info = lv_label_create(screen_12);
-    // Will be updated dynamically to show BLE credentials if available
-    lv_label_set_text_fmt(screen12_wifi_info, "SSID: %s\nPassword: %s", TEST_WIFI_SSID, TEST_WIFI_PASSWORD);
-    lv_obj_set_style_text_color(screen12_wifi_info, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_text_font(screen12_wifi_info, &lv_font_montserrat_20, LV_PART_MAIN);
-    lv_obj_align(screen12_wifi_info, LV_ALIGN_TOP_MID, 0, 120);
-
-    // Connection status label
-    screen12_connection_status = lv_label_create(screen_12);
-    lv_label_set_text(screen12_connection_status, "Not Connected");
-    lv_obj_set_style_text_color(screen12_connection_status, lv_color_hex(0x666666), LV_PART_MAIN);  // Gray
-    lv_obj_set_style_text_font(screen12_connection_status, &lv_font_montserrat_22, LV_PART_MAIN);
-    lv_obj_align(screen12_connection_status, LV_ALIGN_TOP_MID, 0, 200);
-
-    // Connect button
-    lv_obj_t *connect_btn = lv_btn_create(screen_12);
-    lv_obj_set_size(connect_btn, 300, 80);
-    lv_obj_align(connect_btn, LV_ALIGN_TOP_MID, 0, 250);
-    lv_obj_set_style_bg_color(connect_btn, lv_color_hex(0x00AA00), LV_PART_MAIN);  // Green button
-    lv_obj_add_event_cb(connect_btn, screen12_connect_event_handler, LV_EVENT_CLICKED, NULL);
-    lv_obj_clear_flag(connect_btn, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *connect_label = lv_label_create(connect_btn);
-    lv_label_set_text(connect_label, "CONNECT");
-    lv_obj_set_style_text_font(connect_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(connect_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
-    lv_obj_center(connect_label);
-
-    // Add M2 state status box (same position as screen 1)
-    createM2StateBox(screen_12, "screen_12");
-
-    // Back button (top right)
-    lv_obj_t *screen12_back_btn = lv_btn_create(screen_12);
-    lv_obj_set_size(screen12_back_btn, 100, 50);
-    lv_obj_align(screen12_back_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
-    lv_obj_set_style_bg_color(screen12_back_btn, lv_color_hex(0xFF4444), LV_PART_MAIN);  // Red back button
-    lv_obj_add_event_cb(screen12_back_btn, screen12_back_button_event_handler, LV_EVENT_CLICKED, NULL);
-    lv_obj_t* back_label = lv_label_create(screen12_back_btn);
-    lv_label_set_text(back_label, "BACK");
-    lv_obj_set_style_text_font(back_label, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-    lv_obj_center(back_label);
-
-    // Note: Screen loading is handled by switch_to_screen()
-    // lv_scr_load(screen_12); // Removed - handled by screen manager
-
-    Serial.println("[SCREEN] Screen 12 created successfully");
-}
 
 //screen 13 - CAN debug screen
 void create_screen_13(void) {
@@ -2368,7 +2079,7 @@ void create_screen_13(void) {
     lv_obj_set_size(screen13_back_btn, 100, 50);
     lv_obj_align(screen13_back_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
     lv_obj_set_style_bg_color(screen13_back_btn, lv_color_hex(0xFF4444), LV_PART_MAIN);  // Red back button
-    lv_obj_add_event_cb(screen13_back_btn, screen11_back_button_event_handler, LV_EVENT_CLICKED, NULL);  // Reuse existing back handler
+    lv_obj_add_event_cb(screen13_back_btn, generic_back_button_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_t* back_label = lv_label_create(screen13_back_btn);
     lv_label_set_text(back_label, "BACK");
     lv_obj_set_style_text_font(back_label, &lv_font_montserrat_18, LV_PART_MAIN);
@@ -2420,7 +2131,7 @@ void create_screen_16(void) {
     lv_obj_set_size(screen16_back_btn, 100, 50);
     lv_obj_align(screen16_back_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
     lv_obj_set_style_bg_color(screen16_back_btn, lv_color_hex(0xFF4444), LV_PART_MAIN);  // Red back button
-    lv_obj_add_event_cb(screen16_back_btn, screen11_back_button_event_handler, LV_EVENT_CLICKED, NULL);  // Reuse existing back handler
+    lv_obj_add_event_cb(screen16_back_btn, generic_back_button_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_t* back_label = lv_label_create(screen16_back_btn);
     lv_label_set_text(back_label, "BACK");
     lv_obj_set_style_text_font(back_label, &lv_font_montserrat_18, LV_PART_MAIN);
@@ -2481,7 +2192,7 @@ void create_screen_17(void) {
     lv_obj_set_size(screen17_back_btn, 100, 50);
     lv_obj_align(screen17_back_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
     lv_obj_set_style_bg_color(screen17_back_btn, lv_color_hex(0xFF4444), LV_PART_MAIN);  // Red back button
-    lv_obj_add_event_cb(screen17_back_btn, screen11_back_button_event_handler, LV_EVENT_CLICKED, NULL);  // Reuse existing back handler
+    lv_obj_add_event_cb(screen17_back_btn, generic_back_button_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_t* back_label = lv_label_create(screen17_back_btn);
     lv_label_set_text(back_label, "BACK");
     lv_obj_set_style_text_font(back_label, &lv_font_montserrat_18, LV_PART_MAIN);

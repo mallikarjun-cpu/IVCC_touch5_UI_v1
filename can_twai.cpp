@@ -14,6 +14,9 @@ extern struct time_from_m2 {
     uint8_t month, date, day_of_week, hour, minute, second;
 } m2Time;
 
+// Forward declaration for battery detection flag
+extern bool battery_detected;
+
 // Big-endian conversion functions
 uint16_t bigEndianToUint16(uint8_t* data) {
     return (data[0] << 8) | data[1];
@@ -91,14 +94,18 @@ bool send_can_frame(uint32_t id, uint8_t* data, uint8_t length) {
     esp_err_t result = twai_transmit(&message, pdMS_TO_TICKS(100));
     if (result == ESP_OK) {
         can_tx_count++;
+        #if CAN_DEBUG_LEVEL == 1
         Serial.printf("CAN TX: ID=0x%03X, Data=", id);
         for (int i = 0; i < length; i++) {
             Serial.printf("%02X ", data[i]);
         }
         Serial.println();
+        #endif
         return true;
     } else {
+        #if CAN_DEBUG_LEVEL == 1
         Serial.printf("CAN TX failed: %s\n", esp_err_to_name(result));
+        #endif
         return false;
     }
 }
@@ -112,6 +119,7 @@ bool receive_can_frame(twai_message_t* message) {
     esp_err_t result = twai_receive(message, pdMS_TO_TICKS(10)); // 10ms timeout
     if (result == ESP_OK) {
         can_rx_count++;
+        #if CAN_DEBUG_LEVEL == 1
         Serial.printf("CAN RX: ID=0x%03X, DLC=%d, Data=",
                      message->identifier,
                      message->data_length_code);
@@ -119,6 +127,7 @@ bool receive_can_frame(twai_message_t* message) {
             Serial.printf("%02X ", message->data[i]);
         }
         Serial.println();
+        #endif
         return true;
     }
     return false;
@@ -145,7 +154,13 @@ void can_task(void* parameter) {
                         sensorData.volt = voltage_raw / 100.0f;  // Convert to volts
                         sensorData.curr = current_raw / 100.0f;  // Convert to amps
 
-                        Serial.printf("Sensor Data 1: Volt=%.2fV, Curr=%.2fA\n", sensorData.volt, sensorData.curr);
+                        // Update battery detection state (same logic as UART command)
+                        battery_detected = (sensorData.volt >= 9.0f);
+
+                        #if CAN_DEBUG_LEVEL == 1
+                        Serial.printf("Sensor Data 1: Volt=%.2fV, Curr=%.2fA, Battery_detected=%d\n", 
+                                     sensorData.volt, sensorData.curr, battery_detected);
+                        #endif
                     }
                     break;
 
@@ -157,8 +172,10 @@ void can_task(void* parameter) {
                         sensorData.temp3 = (int32_t)bigEndianToInt16(&rx_message.data[4]);
                         sensorData.temp4 = (int32_t)bigEndianToInt16(&rx_message.data[6]);
 
+                        #if CAN_DEBUG_LEVEL == 1
                         Serial.printf("Sensor Data 2: Temp1=%d, Temp2=%d, Temp3=%d, Temp4=%d\n",
                                     sensorData.temp1, sensorData.temp2, sensorData.temp3, sensorData.temp4);
+                        #endif
                     }
                     break;
 
@@ -173,14 +190,18 @@ void can_task(void* parameter) {
                         m2Time.minute = rx_message.data[6];
                         m2Time.second = rx_message.data[7];
 
+                        #if CAN_DEBUG_LEVEL == 1
                         Serial.printf("Sensor Data 3: %04d-%02d-%02d %02d:%02d:%02d (Day %d)\n",
                                     m2Time.year, m2Time.month, m2Time.date,
                                     m2Time.hour, m2Time.minute, m2Time.second, m2Time.day_of_week);
+                        #endif
                     }
                     break;
 
                 default:
+                    #if CAN_DEBUG_LEVEL == 1
                     Serial.printf("Unknown CAN ID: 0x%03X\n", rx_message.identifier);
+                    #endif
                     break;
             }
         }
@@ -199,4 +220,33 @@ void get_can_stats(uint32_t* rx_count, uint32_t* tx_count) {
 // Check if CAN is initialized
 bool is_can_initialized(void) {
     return can_initialized;
+}
+
+// Send contactor control command
+// CAN ID: 0x105
+// Data[0]: 0x01 (M1 Node ID - ESP32 LCD)
+// Data[1]: 0x4C (ON/close) or 0x8B (OFF/open)
+// Data[2-7]: 0x00 (Reserved)
+bool send_contactor_control(uint8_t command) {
+    if (!can_initialized) {
+        Serial.println("[CONTACTOR] CAN not initialized, cannot send contactor control");
+        return false;
+    }
+    
+    uint8_t data[8] = {0};
+    data[0] = M1_NODE_ID;  // 0x01 - M1 Node ID (ESP32 LCD)
+    data[1] = command;      // 0x4C (close) or 0x8B (open)
+    // Data[2-7] remain 0x00 (Reserved)
+    
+    bool result = send_can_frame(CONTACTOR_CONTROL_ID, data, 8);
+    
+    if (result) {
+        const char* cmd_str = (command == CONTACTOR_CLOSE) ? "CLOSE" : "OPEN";
+        Serial.printf("[CONTACTOR] Sent %s command (0x%02X) to M2 via CAN ID 0x%03X\n", 
+                     cmd_str, command, CONTACTOR_CONTROL_ID);
+    } else {
+        Serial.printf("[CONTACTOR] Failed to send contactor control command (0x%02X)\n", command);
+    }
+    
+    return result;
 }

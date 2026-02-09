@@ -106,34 +106,63 @@ uint16_t rs485_CalcFrequencyFor_CC(uint16_t current_frequency, uint16_t target_c
     int16_t frequency_offset = 0;
     int16_t new_frequency = (int16_t)current_frequency;
 
+    // Calculate error percentage (0-100%)
+    // Error % = (abs_error / target_current) * 100
+    // Handle division by zero and very small targets
+    uint32_t error_percent = 0;
+    if (target_current > 0) {
+        // Calculate percentage: (abs_error * 100) / target_current
+        error_percent = (abs_error * 100) / target_current;
+    } else {
+        // If target is 0, treat as 100% error
+        error_percent = 100;
+    }
+    
+    // Clamp to 100% max
+    if (error_percent > 100) {
+        error_percent = 100;
+    }
+
     // Current is too low - need to increase frequency
     if (current_error < 0) {
-        if ((abs_error >= RS485_ERROR_CURRENT_LARGE) || actual_current == 0) {
-            frequency_offset = RS485_CALC_FREQ_COND01;  // Large step: 0.50 Hz
+        if (error_percent >= 90 || actual_current == 0) {
+            frequency_offset = RS485_CALC_FREQ_COND05;  // Very large step: 2.00 Hz (90-100% error)
         }
-        else if (abs_error >= RS485_ERROR_CURRENT_MID) {
-            frequency_offset = RS485_CALC_FREQ_COND02;  // Medium step: 0.25 Hz
+        else if (error_percent >= 70) {
+            frequency_offset = RS485_CALC_FREQ_COND04;  // Large step: 1.00 Hz (70-90% error)
         }
-        else if (abs_error >= RS485_ERROR_CURRENT_SMALL) {
-            frequency_offset = RS485_CALC_FREQ_COND03;  // Small step: 0.10 Hz
+        else if (error_percent >= 50) {
+            frequency_offset = RS485_CALC_FREQ_COND01;  // Medium-large step: 0.50 Hz (50-70% error)
+        }
+        else if (error_percent >= 30) {
+            frequency_offset = RS485_CALC_FREQ_COND02;  // Medium step: 0.30 Hz (30-50% error)
+        }
+        else if (error_percent >= 10) {
+            frequency_offset = RS485_CALC_FREQ_COND03;  // Small step: 0.10 Hz (10-30% error)
         }
         else {
-            frequency_offset = RS485_CALC_FREQ_COND00;  // Tiny step: 0.01 Hz (fine control)
+            frequency_offset = RS485_CALC_FREQ_COND00;  // Tiny step: 0.01 Hz (fine control, <10% error)
         }
     }
     // Current is too high - need to decrease frequency
     else if (current_error > 0) {
-        if (abs_error >= RS485_ERROR_CURRENT_LARGE) {
-            frequency_offset = RS485_CALC_FREQ_COND01;  // Large step: 0.50 Hz
+        if (error_percent >= 90) {
+            frequency_offset = RS485_CALC_FREQ_COND05;  // Very large step: 2.00 Hz (90-100% error)
         }
-        else if (abs_error >= RS485_ERROR_CURRENT_MID) {
-            frequency_offset = RS485_CALC_FREQ_COND02;  // Medium step: 0.25 Hz
+        else if (error_percent >= 70) {
+            frequency_offset = RS485_CALC_FREQ_COND04;  // Large step: 1.00 Hz (70-90% error)
         }
-        else if (abs_error >= RS485_ERROR_CURRENT_SMALL) {
-            frequency_offset = RS485_CALC_FREQ_COND03;  // Small step: 0.10 Hz
+        else if (error_percent >= 50) {
+            frequency_offset = RS485_CALC_FREQ_COND01;  // Medium-large step: 0.50 Hz (50-70% error)
+        }
+        else if (error_percent >= 30) {
+            frequency_offset = RS485_CALC_FREQ_COND02;  // Medium step: 0.30 Hz (30-50% error)
+        }
+        else if (error_percent >= 10) {
+            frequency_offset = RS485_CALC_FREQ_COND03;  // Small step: 0.10 Hz (10-30% error)
         }
         else {
-            frequency_offset = RS485_CALC_FREQ_COND00;  // Tiny step: 0.01 Hz (fine control)
+            frequency_offset = RS485_CALC_FREQ_COND00;  // Tiny step: 0.01 Hz (fine control, <10% error)
         }
         frequency_offset = -frequency_offset;  // Make negative (decrease frequency)
     }

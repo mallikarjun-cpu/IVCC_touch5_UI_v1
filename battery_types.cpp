@@ -34,11 +34,11 @@ void initializeBatteryProfiles() {
     //default battery for screen2 , 0volt
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 0, 0, 0.0, 0.0));
     // 12V Lead Acid batteries (cutoff 16V)
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 10, 16.0, 6.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 20, 16.0, 12.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 35, 16.0, 21.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 65, 16.0, 39.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 100, 16.0, 60.0));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 10, 15.0, 6.0));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 20, 15.0, 12.0));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 35, 15.0, 21.0));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 65, 15.0, 39.0));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 100, 15.0, 60.0));
 
     // 24V Lead Acid batteries (cutoff 33.2V) - also used for 28.8V rated hoist batteries
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 24, 10, 33.2, 6.0));

@@ -86,7 +86,7 @@ bool connect_to_wifi() {
     
     // Wait for connection with timeout (15 seconds)
     int attempts = 0;
-    const int maxAttempts = 30; // 30 * 500ms = 15 seconds
+    const int maxAttempts = 16; // 16 * 500ms = 8 seconds
     
     Serial.print("[WIFI] Connecting");
     while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
