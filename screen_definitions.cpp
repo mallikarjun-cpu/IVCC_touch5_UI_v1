@@ -85,6 +85,10 @@ static unsigned long final_remaining_time_ms = 0;  // Final remaining time when 
 static bool charging_complete = false;  // Flag to stop timer updates after completion
 static bool pending_stop_command = false;  // Flag to send stop command after screen loads
 
+// Ah calculation variables
+static float accumulated_ah = 0.0f;  // Accumulated Ah (default 0.0)
+static unsigned long last_ah_update_time = 0;  // Last time Ah was updated (for rate limiting)
+
 // Timer table objects for screens 3, 4, 5, 6, 7
 static lv_obj_t* screen3_timer_table = nullptr;
 static lv_obj_t* screen4_timer_table = nullptr;
@@ -107,7 +111,7 @@ static lv_obj_t* screen1_wifi_status_label = nullptr;
 
 // screen 13 CAN frame display
 static lv_obj_t* screen13_can_frame_label = nullptr;
-#define CAN_DEBUG_MAX_LINES 5
+#define CAN_DEBUG_MAX_LINES 7
 static char can_debug_lines[CAN_DEBUG_MAX_LINES][200];
 static int can_debug_current_line = 0;
 
@@ -287,6 +291,8 @@ void emergency_stop_event_handler(lv_event_t * e);
 void home_button_event_handler(lv_event_t * e);
 // Forward declaration for WiFi status update
 void update_screen1_wifi_status(void);
+// Forward declaration for Ah update function
+void update_accumulated_ah(void);
 
 // ============================================================================
 // Screen Management Functions
@@ -465,11 +471,13 @@ void update_charging_control() {
         );
         
         // Debug logging
+        #if ACTUAL_TARGET_CC_CV_debug
         int32_t current_error = (int32_t)actual_current_0_01A - (int32_t)target_current_0_01A;
         Serial.printf("[CHARGING_START] Target: %.2fA, Actual: %.2fA, Error: %d (0.01A), Freq: %d -> %d (%.2f Hz -> %.2f Hz)\n",
             target_current, safe_actual_current, current_error,
             current_frequency, new_frequency,
             current_frequency / 100.0f, new_frequency / 100.0f);
+        #endif
         
         // Send frequency command
         rs485_sendFrequencyCommand(new_frequency);
@@ -493,11 +501,13 @@ void update_charging_control() {
         );
         
         // Debug logging
+        #if ACTUAL_TARGET_CC_CV_debug
         int32_t current_error = (int32_t)actual_current_0_01A - (int32_t)target_current_0_01A;
         Serial.printf("[CHARGING_CC] Target: %.2fA, Actual: %.2fA, Error: %d (0.01A), Freq: %d -> %d (%.2f Hz -> %.2f Hz)\n",
             target_current, safe_actual_current, current_error,
             current_frequency, new_frequency,
             current_frequency / 100.0f, new_frequency / 100.0f);
+        #endif
         
         // Send frequency command
         rs485_sendFrequencyCommand(new_frequency);
@@ -517,6 +527,17 @@ void update_charging_control() {
             cv_state_start_time = millis();  // Record CV state start time for charging control
             cv_start_time = millis();  // Record CV state start time for timer display
             Serial.println("[CHARGING] CV state timing started");
+            
+            // CRITICAL: Immediately calculate and send CV frequency command to prevent motor freeze
+            // Don't wait for next update_charging_control() call - ensure continuous control
+            uint16_t cv_frequency = rs485_CalcFrequencyFor_CV(
+                current_frequency, 
+                target_voltage_0_01V, 
+                actual_voltage_0_01V
+            );
+            rs485_sendFrequencyCommand(cv_frequency);
+            current_frequency = cv_frequency;
+            Serial.println("[CHARGING] CV frequency command sent immediately on transition");
             
             // Calculate initial remaining time for immediate display
             if (cc_state_duration_for_timer > 0) {
@@ -541,11 +562,13 @@ void update_charging_control() {
         );
         
         // Debug logging
+        #if ACTUAL_TARGET_CC_CV_debug
         int32_t voltage_error = (int32_t)actual_voltage_0_01V - (int32_t)target_voltage_0_01V;
         Serial.printf("[CHARGING_CV] Target: %.2fV, Actual: %.2fV, Error: %d (0.01V), Freq: %d -> %d (%.2f Hz -> %.2f Hz)\n",
             target_voltage, safe_actual_voltage, voltage_error,
             current_frequency, new_frequency,
             current_frequency / 100.0f, new_frequency / 100.0f);
+        #endif
         
         // Send frequency command
         rs485_sendFrequencyCommand(new_frequency);
@@ -644,6 +667,9 @@ void update_current_screen() {
     // Charging control (runs only in charging states, once per second)
     update_charging_control();
     
+    // Update Ah calculation (runs only in charging states)
+    update_accumulated_ah();
+    
     // Update battery details on screens 3, 4, 5
     if (screen3_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
         if (selected_battery_profile != nullptr) {
@@ -697,6 +723,23 @@ void update_current_screen() {
         total_elapsed = millis() - charging_start_time;
     }
     
+    // Format Ah value (always update, even if time is 0)
+    char ah_str[20];
+    sprintf(ah_str, "%.1f", accumulated_ah);
+    
+    // Update Ah display on screens 3, 4, 5 (always, not just when time > 0)
+    if (!charging_complete) {
+        if (screen3_timer_table != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
+            lv_table_set_cell_value(screen3_timer_table, 1, 2, ah_str);
+        }
+        if (screen4_timer_table != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
+            lv_table_set_cell_value(screen4_timer_table, 1, 2, ah_str);
+        }
+        if (screen5_timer_table != nullptr && current_screen_id == SCREEN_CHARGING_CV) {
+            lv_table_set_cell_value(screen5_timer_table, 1, 2, ah_str);
+        }
+    }
+    
     if (total_elapsed > 0) {
         unsigned long total_seconds = total_elapsed / 1000;
         unsigned long total_minutes = total_seconds / 60;
@@ -745,6 +788,7 @@ void update_current_screen() {
         // Update final time on screens 6 and 7 (always show final time when complete)
         if (screen6_timer_table != nullptr && current_screen_id == SCREEN_CHARGING_COMPLETE) {
             lv_table_set_cell_value(screen6_timer_table, 1, 0, time_str);
+            lv_table_set_cell_value(screen6_timer_table, 1, 2, ah_str);
             
             // Also display final remaining time on screen 6
             if (final_remaining_time_ms > 0) {
@@ -759,6 +803,7 @@ void update_current_screen() {
         }
         if (screen7_timer_table != nullptr && current_screen_id == SCREEN_EMERGENCY_STOP) {
             lv_table_set_cell_value(screen7_timer_table, 1, 0, time_str);
+            lv_table_set_cell_value(screen7_timer_table, 1, 2, ah_str);
         }
     }
     
@@ -934,6 +979,51 @@ void update_m2_state_display() {
     }
 
     lvgl_port_unlock();
+}
+
+// Update accumulated Ah based on current flow
+void update_accumulated_ah(void) {
+    // Only run in charging states
+    if (current_app_state != STATE_CHARGING_START && 
+        current_app_state != STATE_CHARGING_CC && 
+        current_app_state != STATE_CHARGING_CV) {
+        return;
+    }
+    
+    // Rate limiting: update every 1 second
+    const unsigned long AH_UPDATE_INTERVAL = 1000; // 1 second
+    unsigned long current_time = millis();
+    
+    // Initialize on first call or if reset
+    if (last_ah_update_time == 0) {
+        last_ah_update_time = current_time;
+        Serial.println("[AH] Ah calculation initialized");
+        return;
+    }
+    
+    // Check if enough time has passed
+    if (current_time - last_ah_update_time < AH_UPDATE_INTERVAL) {
+        return;
+    }
+    
+    // Calculate time delta in hours
+    unsigned long time_delta_ms = current_time - last_ah_update_time;
+    float time_delta_hours = time_delta_ms / 3600000.0f; // Convert ms to hours
+    
+    // Get current (handle negative values)
+    float safe_current = (sensorData.curr < 0.0f) ? 0.0f : sensorData.curr;
+    
+    // Ah = current (A) * time (h)
+    float ah_increment = safe_current * time_delta_hours;
+    accumulated_ah += ah_increment;
+    
+    #if Ah_CALCULATION_DEBUG
+        // Debug logging
+        Serial.printf("[AH] Current: %.2fA, Time: %.3fh, Increment: %.4fAh, Total: %.2fAh\n",
+                    safe_current, time_delta_hours, ah_increment, accumulated_ah);
+    #endif
+    
+    last_ah_update_time = current_time;
 }
 
 // Function to check WiFi connection status and update UI
@@ -1265,6 +1355,10 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         final_charging_time_ms = 0;
         final_remaining_time_ms = 0;
         pending_stop_command = false;  // Reset stop command flag
+        
+        // Reset Ah calculation
+        accumulated_ah = 0.0f;
+        last_ah_update_time = millis();
 
         // Switch to charging start state
         current_app_state = STATE_CHARGING_START;
@@ -1685,7 +1779,7 @@ void create_screen_2(void) {
 void create_screen_3(void) {
     // Create screen 3 (charging started screen - similar layout to screen 2)
     screen_3 = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(screen_3, lv_color_hex(0x90EE90), LV_PART_MAIN);  // Light green background
+    lv_obj_set_style_bg_color(screen_3, lv_color_hex(0xB8E6B8), LV_PART_MAIN);  // Lighter green background
     lv_obj_set_style_bg_opa(screen_3, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_opa(screen_3, LV_OPA_COVER, LV_PART_MAIN);
 
@@ -1712,26 +1806,31 @@ void create_screen_3(void) {
         lv_obj_set_pos(data_table, 12, 110);
     }
 
-    // Battery profile details label (below table, moved up 50px)
+    // Battery profile details label (below table, moved up 30px)
     screen3_battery_details_label = lv_label_create(screen_3);
     lv_label_set_text(screen3_battery_details_label, "Selected Battery: --");
     lv_obj_set_style_text_color(screen3_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen3_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen3_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 300);  // Moved up 50px (350 -> 300)
+    lv_obj_align(screen3_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
     
-    // Timer table (2x2) for screen 3 - below battery label, left aligned
+    // Timer table (3x2) for screen 3 - below battery label, left aligned
     screen3_timer_table = lv_table_create(screen_3);
-    lv_table_set_col_cnt(screen3_timer_table, 2);
+    lv_table_set_col_cnt(screen3_timer_table, 3);
     lv_table_set_row_cnt(screen3_timer_table, 2);
     lv_table_set_col_width(screen3_timer_table, 0, 200);
     lv_table_set_col_width(screen3_timer_table, 1, 200);
+    lv_table_set_col_width(screen3_timer_table, 2, 200);
     lv_table_set_cell_value(screen3_timer_table, 0, 0, "Total Time");
     lv_table_set_cell_value(screen3_timer_table, 0, 1, "");
+    lv_table_set_cell_value(screen3_timer_table, 0, 2, "Charged(Ah)");
     lv_table_set_cell_value(screen3_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen3_timer_table, 1, 1, "");
-    lv_obj_set_style_bg_color(screen3_timer_table, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
-    lv_obj_set_style_text_font(screen3_timer_table, &lv_font_montserrat_20, LV_PART_ITEMS);
-    lv_obj_align(screen3_timer_table, LV_ALIGN_TOP_LEFT, 12, 360);  // Below battery label, left aligned
+    lv_table_set_cell_value(screen3_timer_table, 1, 2, "0.0");
+    lv_obj_set_style_bg_color(screen3_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
+    lv_obj_set_style_border_color(screen3_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
+    lv_obj_set_style_border_width(screen3_timer_table, 1, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen3_timer_table, &lv_font_montserrat_22, LV_PART_ITEMS);
+    lv_obj_align(screen3_timer_table, LV_ALIGN_TOP_LEFT, 12, 330);  // Moved up 30px (360 -> 330)
     lv_obj_clear_flag(screen3_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 3
@@ -1785,26 +1884,31 @@ void create_screen_4(void) {
         lv_obj_set_pos(data_table, 12, 110);
     }
 
-    // Battery profile details label (below table, moved up 50px)
+    // Battery profile details label (below table, moved up 30px)
     screen4_battery_details_label = lv_label_create(screen_4);
     lv_label_set_text(screen4_battery_details_label, "Selected Battery: --");
     lv_obj_set_style_text_color(screen4_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen4_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen4_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 300);  // Moved up 50px (350 -> 300)
+    lv_obj_align(screen4_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
     
-    // Timer table (2x2) for screen 4 - below battery label, left aligned
+    // Timer table (3x2) for screen 4 - below battery label, left aligned
     screen4_timer_table = lv_table_create(screen_4);
-    lv_table_set_col_cnt(screen4_timer_table, 2);
+    lv_table_set_col_cnt(screen4_timer_table, 3);
     lv_table_set_row_cnt(screen4_timer_table, 2);
     lv_table_set_col_width(screen4_timer_table, 0, 200);
     lv_table_set_col_width(screen4_timer_table, 1, 200);
+    lv_table_set_col_width(screen4_timer_table, 2, 200);
     lv_table_set_cell_value(screen4_timer_table, 0, 0, "Total Time");
     lv_table_set_cell_value(screen4_timer_table, 0, 1, "");
+    lv_table_set_cell_value(screen4_timer_table, 0, 2, "Charged(Ah)");
     lv_table_set_cell_value(screen4_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen4_timer_table, 1, 1, "");
-    lv_obj_set_style_bg_color(screen4_timer_table, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
-    lv_obj_set_style_text_font(screen4_timer_table, &lv_font_montserrat_20, LV_PART_ITEMS);
-    lv_obj_align(screen4_timer_table, LV_ALIGN_TOP_LEFT, 12, 360);  // Below battery label, left aligned
+    lv_table_set_cell_value(screen4_timer_table, 1, 2, "0.0");
+    lv_obj_set_style_bg_color(screen4_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
+    lv_obj_set_style_border_color(screen4_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
+    lv_obj_set_style_border_width(screen4_timer_table, 1, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen4_timer_table, &lv_font_montserrat_22, LV_PART_ITEMS);
+    lv_obj_align(screen4_timer_table, LV_ALIGN_TOP_LEFT, 12, 330);  // Moved up 30px (360 -> 330)
     lv_obj_clear_flag(screen4_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 4
@@ -1830,7 +1934,7 @@ void create_screen_4(void) {
 //screen 5 - Constant Voltage (CV) mode
 void create_screen_5(void) {
     screen_5 = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(screen_5, lv_color_hex(0x90EE90), LV_PART_MAIN);  // Light green background
+    lv_obj_set_style_bg_color(screen_5, lv_color_hex(0x6BC96B), LV_PART_MAIN);  // Darker green background
     lv_obj_set_style_bg_opa(screen_5, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_opa(screen_5, LV_OPA_COVER, LV_PART_MAIN);
 
@@ -1857,26 +1961,31 @@ void create_screen_5(void) {
         lv_obj_set_pos(data_table, 12, 110);
     }
 
-    // Battery profile details label (below table, moved up 50px)
+    // Battery profile details label (below table, moved up 30px)
     screen5_battery_details_label = lv_label_create(screen_5);
     lv_label_set_text(screen5_battery_details_label, "Selected Battery: --");
     lv_obj_set_style_text_color(screen5_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen5_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen5_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 300);  // Moved up 50px (350 -> 300)
+    lv_obj_align(screen5_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
     
-    // Timer table (2x2) for screen 5 - shows total time and remaining time, below battery label, left aligned
+    // Timer table (3x2) for screen 5 - shows total time, remaining time, and Ah, below battery label, left aligned
     screen5_timer_table = lv_table_create(screen_5);
-    lv_table_set_col_cnt(screen5_timer_table, 2);
+    lv_table_set_col_cnt(screen5_timer_table, 3);
     lv_table_set_row_cnt(screen5_timer_table, 2);
     lv_table_set_col_width(screen5_timer_table, 0, 200);
     lv_table_set_col_width(screen5_timer_table, 1, 200);
+    lv_table_set_col_width(screen5_timer_table, 2, 200);
     lv_table_set_cell_value(screen5_timer_table, 0, 0, "Total Time");
     lv_table_set_cell_value(screen5_timer_table, 0, 1, "Remaining");
+    lv_table_set_cell_value(screen5_timer_table, 0, 2, "Charged(Ah)");
     lv_table_set_cell_value(screen5_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen5_timer_table, 1, 1, "00:00");
-    lv_obj_set_style_bg_color(screen5_timer_table, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
-    lv_obj_set_style_text_font(screen5_timer_table, &lv_font_montserrat_20, LV_PART_ITEMS);
-    lv_obj_align(screen5_timer_table, LV_ALIGN_TOP_LEFT, 12, 360);  // Below battery label, left aligned
+    lv_table_set_cell_value(screen5_timer_table, 1, 2, "0.0");
+    lv_obj_set_style_bg_color(screen5_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
+    lv_obj_set_style_border_color(screen5_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
+    lv_obj_set_style_border_width(screen5_timer_table, 1, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen5_timer_table, &lv_font_montserrat_22, LV_PART_ITEMS);
+    lv_obj_align(screen5_timer_table, LV_ALIGN_TOP_LEFT, 12, 330);  // Moved up 30px (360 -> 330)
     lv_obj_clear_flag(screen5_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 5
@@ -1929,19 +2038,24 @@ void create_screen_6(void) {
         lv_obj_set_pos(data_table, 12, 110);
     }
     
-    // Timer table (2x2) for screen 6 - shows total time and remaining time, left aligned
+    // Timer table (3x2) for screen 6 - shows total time, remaining time, and Ah, left aligned
     screen6_timer_table = lv_table_create(screen_6);
-    lv_table_set_col_cnt(screen6_timer_table, 2);
+    lv_table_set_col_cnt(screen6_timer_table, 3);
     lv_table_set_row_cnt(screen6_timer_table, 2);
     lv_table_set_col_width(screen6_timer_table, 0, 200);
     lv_table_set_col_width(screen6_timer_table, 1, 200);
+    lv_table_set_col_width(screen6_timer_table, 2, 200);
     lv_table_set_cell_value(screen6_timer_table, 0, 0, "Total Time");
     lv_table_set_cell_value(screen6_timer_table, 0, 1, "Remaining");
+    lv_table_set_cell_value(screen6_timer_table, 0, 2, "Charged(Ah)");
     lv_table_set_cell_value(screen6_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen6_timer_table, 1, 1, "00:00");
-    lv_obj_set_style_bg_color(screen6_timer_table, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
-    lv_obj_set_style_text_font(screen6_timer_table, &lv_font_montserrat_20, LV_PART_ITEMS);
-    lv_obj_align(screen6_timer_table, LV_ALIGN_TOP_LEFT, 12, 300);  // Left aligned, moved up
+    lv_table_set_cell_value(screen6_timer_table, 1, 2, "0.0");
+    lv_obj_set_style_bg_color(screen6_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
+    lv_obj_set_style_border_color(screen6_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
+    lv_obj_set_style_border_width(screen6_timer_table, 1, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen6_timer_table, &lv_font_montserrat_22, LV_PART_ITEMS);
+    lv_obj_align(screen6_timer_table, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
     lv_obj_clear_flag(screen6_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 6
@@ -1994,19 +2108,24 @@ void create_screen_7(void) {
         lv_obj_set_pos(data_table, 12, 110);
     }
     
-    // Timer table (2x2) for screen 7 - shows total time, left aligned
+    // Timer table (3x2) for screen 7 - shows total time and Ah, left aligned
     screen7_timer_table = lv_table_create(screen_7);
-    lv_table_set_col_cnt(screen7_timer_table, 2);
+    lv_table_set_col_cnt(screen7_timer_table, 3);
     lv_table_set_row_cnt(screen7_timer_table, 2);
     lv_table_set_col_width(screen7_timer_table, 0, 200);
     lv_table_set_col_width(screen7_timer_table, 1, 200);
+    lv_table_set_col_width(screen7_timer_table, 2, 200);
     lv_table_set_cell_value(screen7_timer_table, 0, 0, "Total Time");
     lv_table_set_cell_value(screen7_timer_table, 0, 1, "");
+    lv_table_set_cell_value(screen7_timer_table, 0, 2, "Charged(Ah)");
     lv_table_set_cell_value(screen7_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen7_timer_table, 1, 1, "");
-    lv_obj_set_style_bg_color(screen7_timer_table, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
-    lv_obj_set_style_text_font(screen7_timer_table, &lv_font_montserrat_20, LV_PART_ITEMS);
-    lv_obj_align(screen7_timer_table, LV_ALIGN_TOP_LEFT, 12, 300);  // Left aligned, moved up
+    lv_table_set_cell_value(screen7_timer_table, 1, 2, "0.0");
+    lv_obj_set_style_bg_color(screen7_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
+    lv_obj_set_style_border_color(screen7_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
+    lv_obj_set_style_border_width(screen7_timer_table, 1, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen7_timer_table, &lv_font_montserrat_22, LV_PART_ITEMS);
+    lv_obj_align(screen7_timer_table, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
     lv_obj_clear_flag(screen7_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 7

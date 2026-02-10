@@ -1,5 +1,6 @@
 
 #include "rs485_vfdComs.h"
+#include "screen_definitions.h"  // For ACTUAL_TARGET_CC_CV_debug macro
 #include <HardwareSerial.h>
 #include <cstring>
 
@@ -85,10 +86,12 @@ void rs485_sendFrequencyCommand(uint16_t frequency_0_01hz) {
     rs485_sendModbusCommand(turnPacket.data(), 8, "Frequency command");
 
     // Debug print - show frequency in Hz using String for better C++ style
+    #if ACTUAL_TARGET_CC_CV_debug
     float frequency_hz = frequency_0_01hz / 100.0f;
     String msg = "Frequency command sent: " + String(frequency_0_01hz) +
                  " (0.01Hz units) = " + String(frequency_hz, 2) + " Hz";
     Serial.println(msg);
+    #endif
 }
 
 /**

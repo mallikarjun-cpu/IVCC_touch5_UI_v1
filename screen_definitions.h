@@ -4,6 +4,10 @@
 #include <lvgl.h>
 #include "battery_types.h"
 
+// Debug macro for CC/CV charging control prints
+#define ACTUAL_TARGET_CC_CV_debug 0  // 1 = print, 0 = print off
+#define Ah_CALCULATION_DEBUG 0  // 1 = print, 0 = print off
+
 // Global screen objects
 extern lv_obj_t* screen_1;
 extern lv_obj_t* screen_2;
