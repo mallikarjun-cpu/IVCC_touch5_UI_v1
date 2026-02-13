@@ -43,15 +43,10 @@ void initializeBatteryProfiles() {
     // 24V Lead Acid batteries (cutoff 33.2V) - also used for 28.8V rated hoist batteries
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 24, 10, 33.2, 6.0));
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 24, 20, 33.2, 12.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 24, 35, 33.2, 21.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 24, 65, 33.2, 39.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 24, 100, 33.2, 60.0));
 
     // 36V Lead Acid batteries (cutoff 48V)
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 36, 10, 48.0, 6.0));
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 36, 20, 48.0, 12.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 36, 35, 48.0, 21.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 36, 65, 48.0, 39.0));
 
     // 48V Lead Acid batteries (cutoff 53.9V)
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 48, 280, 66, 6.0));
@@ -60,13 +55,11 @@ void initializeBatteryProfiles() {
     // 18V Lead Acid batteries (cutoff 21V) - Note: using LEAD_ACID chemistry for 18V
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 18, 10, 21.0, 6.0));
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 18, 20, 21.0, 12.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 18, 35, 21.0, 21.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 18, 65, 21.0, 39.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 18, 100, 21.0, 60.0));
 
     // 28V Lithium batteries
-    batteryProfiles.addProfile(new BatteryType(LITHIUM, 28, 10, 32.0, 6.0));
-    batteryProfiles.addProfile(new BatteryType(LITHIUM, 28, 20, 32.0, 12.0));
+    batteryProfiles.addProfile(new BatteryType(LITHIUM, 28, 10, 31.0, 6.0));
+    batteryProfiles.addProfile(new BatteryType(LITHIUM, 28, 20, 31.0, 12.0));
+    batteryProfiles.addProfile(new BatteryType(LITHIUM, 28, 30, 31.0, 18.0));
 
     // 48V Lithium batteries (cutoff 53.9V)
     batteryProfiles.addProfile(new BatteryType(LITHIUM, 48, 4, 53.9, 6.0));

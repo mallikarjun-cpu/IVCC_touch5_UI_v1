@@ -5,6 +5,7 @@
 #include "lvgl_v8_port.h"
 #include "rs485_vfdComs.h"
 #include "ble.h"
+#include "wifi_funcs.h"
 #include <Arduino.h>
 #include <esp_heap_caps.h>
 #include <WiFi.h>
@@ -99,12 +100,22 @@ static lv_obj_t* screen7_timer_table = nullptr;
 // screen 2 confirmation popup
 static lv_obj_t* screen2_confirm_popup = nullptr;
 static lv_obj_t* screen2_confirm_title_label = nullptr;
-static lv_obj_t* screen2_confirm_voltage_label = nullptr;
-static lv_obj_t* screen2_confirm_capacity_label = nullptr;
+static lv_obj_t* screen2_confirm_battery_info_label = nullptr;  // Battery info (voltage, Ah)
+static lv_obj_t* screen2_confirm_voltage_label = nullptr;  // TV label
+static lv_obj_t* screen2_confirm_capacity_label = nullptr;  // TC label
 static lv_obj_t* screen2_confirm_current_label = nullptr;
 static lv_obj_t* screen2_confirm_type_label = nullptr;
 static lv_obj_t* screen2_confirm_agree_btn = nullptr;
 static lv_obj_t* screen2_confirm_change_btn = nullptr;
+
+// screen 2 confirmed battery display label (below table)
+static lv_obj_t* screen2_confirmed_battery_label = nullptr;
+
+// screen 6 and 7 remove battery popup
+static lv_obj_t* screen6_remove_battery_popup = nullptr;
+static lv_obj_t* screen6_remove_battery_label = nullptr;
+static lv_obj_t* screen7_remove_battery_popup = nullptr;
+static lv_obj_t* screen7_remove_battery_label = nullptr;
 
 // screen 1 WiFi status display
 static lv_obj_t* screen1_wifi_status_label = nullptr;
@@ -386,6 +397,19 @@ void switch_to_screen(screen_id_t screen_id) {
         // Manage battery container visibility (only for screens that need profiles)
         if (screen2_battery_container != nullptr) {
             if (screen_id == SCREEN_BATTERY_DETECTED) {
+                // Reset screen 2 UI state when switching to it - ensure clean state
+                // Hide buttons and popup, show battery list
+                if (screen2_button_container != nullptr) {
+                    lv_obj_add_flag(screen2_button_container, LV_OBJ_FLAG_HIDDEN);
+                }
+                if (screen2_confirm_popup != nullptr) {
+                    lv_obj_add_flag(screen2_confirm_popup, LV_OBJ_FLAG_HIDDEN);
+                }
+                // Hide confirmed battery label when switching to screen 2 (will show again if battery is confirmed)
+                if (screen2_confirmed_battery_label != nullptr) {
+                    lv_obj_add_flag(screen2_confirmed_battery_label, LV_OBJ_FLAG_HIDDEN);
+                }
+                
                 lv_obj_clear_flag(screen2_battery_container, LV_OBJ_FLAG_HIDDEN);
                 // Refresh profiles display when switching to screen 2
                 if (sensorData.volt > 0) {
@@ -670,15 +694,58 @@ void update_current_screen() {
     // Update Ah calculation (runs only in charging states)
     update_accumulated_ah();
     
+    // Check battery removal on screens 6 and 7 - auto-dismiss popup and navigate when battery removed
+    if ((current_screen_id == SCREEN_CHARGING_COMPLETE || current_screen_id == SCREEN_EMERGENCY_STOP)) {
+        // Check if battery was removed while popup is showing
+        if (!battery_detected || sensorData.volt < 9.0f) {
+            // Battery removed - hide popup if visible
+            lvgl_port_lock(-1);  // Lock LVGL for thread safety
+            bool should_navigate = false;
+            
+            if (screen6_remove_battery_popup != nullptr && current_screen_id == SCREEN_CHARGING_COMPLETE) {
+                if (!lv_obj_has_flag(screen6_remove_battery_popup, LV_OBJ_FLAG_HIDDEN)) {
+                    Serial.println("[HOME] Battery removed, auto-navigating to home");
+                    lv_obj_add_flag(screen6_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);
+                    should_navigate = true;
+                }
+            } else if (screen7_remove_battery_popup != nullptr && current_screen_id == SCREEN_EMERGENCY_STOP) {
+                if (!lv_obj_has_flag(screen7_remove_battery_popup, LV_OBJ_FLAG_HIDDEN)) {
+                    Serial.println("[HOME] Battery removed, auto-navigating to home");
+                    lv_obj_add_flag(screen7_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);
+                    should_navigate = true;
+                }
+            }
+            
+            if (should_navigate) {
+                // Reset variables
+                charge_stop_reason = CHARGE_STOP_NONE;
+                charging_start_time = 0;
+                cv_start_time = 0;
+                    cc_state_duration_for_timer = 0;
+                    pending_stop_command = false;
+                    battery_detected = false;
+                    
+                    // Clear selected battery profile - user must select again from scratch
+                    selected_battery_profile = nullptr;
+                    
+                    // Navigate to home
+                    current_app_state = STATE_HOME;
+                    lvgl_port_unlock();  // Unlock before calling switch_to_screen (which may lock internally)
+                    switch_to_screen(SCREEN_HOME);
+            } else {
+                lvgl_port_unlock();  // Unlock if no navigation needed
+            }
+        }
+    }
+    
     // Update battery details on screens 3, 4, 5
     if (screen3_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
         if (selected_battery_profile != nullptr) {
             char details_text[100];
-            sprintf(details_text, "Selected Battery: %s (%dV, %dAh, %s)",
+            sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)",
                     selected_battery_profile->getDisplayName().c_str(),
-                    selected_battery_profile->getRatedVoltage(),
-                    selected_battery_profile->getRatedAh(),
-                    getBatteryChemistryName(selected_battery_profile));
+                    selected_battery_profile->getCutoffVoltage(),
+                    selected_battery_profile->getConstCurrent());
             lv_label_set_text(screen3_battery_details_label, details_text);
         } else {
             lv_label_set_text(screen3_battery_details_label, "Selected Battery: None");
@@ -687,11 +754,10 @@ void update_current_screen() {
     if (screen4_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
         if (selected_battery_profile != nullptr) {
             char details_text[100];
-            sprintf(details_text, "Selected Battery: %s (%dV, %dAh, %s)",
+            sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)",
                     selected_battery_profile->getDisplayName().c_str(),
-                    selected_battery_profile->getRatedVoltage(),
-                    selected_battery_profile->getRatedAh(),
-                    getBatteryChemistryName(selected_battery_profile));
+                    selected_battery_profile->getCutoffVoltage(),
+                    selected_battery_profile->getConstCurrent());
             lv_label_set_text(screen4_battery_details_label, details_text);
         } else {
             lv_label_set_text(screen4_battery_details_label, "Selected Battery: None");
@@ -700,11 +766,10 @@ void update_current_screen() {
     if (screen5_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_CV) {
         if (selected_battery_profile != nullptr) {
             char details_text[100];
-            sprintf(details_text, "Selected Battery: %s (%dV, %dAh, %s)",
+            sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)",
                     selected_battery_profile->getDisplayName().c_str(),
-                    selected_battery_profile->getRatedVoltage(),
-                    selected_battery_profile->getRatedAh(),
-                    getBatteryChemistryName(selected_battery_profile));
+                    selected_battery_profile->getCutoffVoltage(),
+                    selected_battery_profile->getConstCurrent());
             lv_label_set_text(screen5_battery_details_label, details_text);
         } else {
             lv_label_set_text(screen5_battery_details_label, "Selected Battery: None");
@@ -1165,14 +1230,18 @@ void update_ble_debug_display() {
     if (screen17_wifi_status_label != nullptr && screen17_ble_status_label != nullptr && screen17_ble_info_label != nullptr && current_screen_id == SCREEN_BLE_DEBUG) {
         lvgl_port_lock(-1);
 
-        // Check WiFi connection status
-        bool wifi_connected = (WiFi.status() == WL_CONNECTED);
+        // Check WiFi connection status (but show SoftAP status if active)
+        bool softap_running = is_softap_running();
+        bool wifi_connected = softap_running ? false : (WiFi.status() == WL_CONNECTED);
         
         // Check BLE connection status
         bool ble_connected = bleManager.isConnected();
 
-        // Update WiFi status label with color
-        if (wifi_connected) {
+        // Update WiFi status label with color (show SoftAP status if active)
+        if (softap_running) {
+            lv_label_set_text(screen17_wifi_status_label, "SoftAP Active");
+            lv_obj_set_style_text_color(screen17_wifi_status_label, lv_color_hex(0x4A90E2), LV_PART_MAIN);  // Blue
+        } else if (wifi_connected) {
             lv_label_set_text(screen17_wifi_status_label, "WiFi Connected");
             lv_obj_set_style_text_color(screen17_wifi_status_label, lv_color_hex(0x00FF00), LV_PART_MAIN);  // Green
         } else {
@@ -1189,9 +1258,24 @@ void update_ble_debug_display() {
             lv_obj_set_style_text_color(screen17_ble_status_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
         }
 
-        // Update BLE credentials display
-        char info_text[300];
-        if (reboot_countdown_active) {
+        // Update BLE credentials display with OTA/SoftAP status
+        char info_text[400];
+        
+        // Check if SoftAP/OTA is active (softap_running already declared above)
+        bool ota_running = is_ota_server_running();
+        uint8_t ota_prog = get_ota_progress();
+        
+        if (softap_running && ota_running) {
+            // OTA mode active
+            IPAddress ap_ip = get_softap_ip();
+            if (ota_prog > 0 && ota_prog < 100) {
+                sprintf(info_text, "OTA UPDATE MODE\n\nSoftAP: %s\nIP: %s\nPassword: tiger123\n\nUpload Progress: %u%%\n\nSend firmware to:\nhttp://%s/update", 
+                        SOFTAP_SSID, ap_ip.toString().c_str(), ota_prog, ap_ip.toString().c_str());
+            } else {
+                sprintf(info_text, "OTA UPDATE MODE\n\nSoftAP: %s\nIP: %s\nPassword: tiger123\n\nReady for firmware upload\n\nSend POST to:\nhttp://%s/update", 
+                        SOFTAP_SSID, ap_ip.toString().c_str(), ap_ip.toString().c_str());
+            }
+        } else if (reboot_countdown_active) {
             // Show countdown message
             unsigned long elapsed = millis() - reboot_countdown_start_time;
             unsigned long remaining = (REBOOT_COUNTDOWN_DURATION - elapsed) / 1000;
@@ -1202,10 +1286,10 @@ void update_ble_debug_display() {
             sprintf(info_text, "SSID: %s\nPassword: %s\n\nCredentials saved!\n\nDevice will reboot to connect to WiFi\nin %lu/6 secs", 
                     ble_ssid.c_str(), ble_key.c_str(), current_second);
         } else if (ble_ssid.length() > 0 || ble_key.length() > 0) {
-            sprintf(info_text, "SSID: %s\nPassword: %s\n\nCredentials received via BLE", 
+            sprintf(info_text, "SSID: %s\nPassword: %s\n\nCredentials received via BLE\n\nSend 'OTA_START' to begin OTA update", 
                     ble_ssid.c_str(), ble_key.c_str());
         } else {
-            sprintf(info_text, "No credentials received yet.\n\nWaiting for Android app to send:\nSSID|password|CONNECT");
+            sprintf(info_text, "No credentials received yet.\n\nWaiting for Android app to send:\nSSID|password|CONNECT\n\nOr send 'OTA_START' for OTA update");
         }
         lv_label_set_text(screen17_ble_info_label, info_text);
 
@@ -1291,6 +1375,18 @@ void screen2_confirm_agree_event_handler(lv_event_t * e) {
         lv_obj_clear_flag(screen2_button_container, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(screen2_confirm_popup, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(screen2_battery_container, LV_OBJ_FLAG_HIDDEN);
+        
+        // Show confirmed battery info below the table
+        if (screen2_confirmed_battery_label != nullptr && selected_battery_profile != nullptr) {
+            char confirmed_str[150];
+            sprintf(confirmed_str, "Confirmed Battery: %d V, %d Ah (TV: %.1f V, TC: %.1f A)",
+                    selected_battery_profile->getRatedVoltage(),
+                    selected_battery_profile->getRatedAh(),
+                    selected_battery_profile->getCutoffVoltage(),
+                    selected_battery_profile->getConstCurrent());
+            lv_label_set_text(screen2_confirmed_battery_label, confirmed_str);
+            lv_obj_clear_flag(screen2_confirmed_battery_label, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 }
 
@@ -1315,11 +1411,21 @@ void screen2_profile_selected_event_handler(lv_event_t * e) {
             // Store selected profile globally for screen 3 display
             selected_battery_profile = selected_profile;
 
-            // Update confirmation popup with selected profile details
-            lv_label_set_text_fmt(screen2_confirm_voltage_label, "Voltage: %d V", selected_profile->getRatedVoltage());
-            lv_label_set_text_fmt(screen2_confirm_capacity_label, "Capacity: %d Ah", selected_profile->getRatedAh());
-            lv_label_set_text_fmt(screen2_confirm_current_label, "Current: %.1f A", selected_profile->getConstCurrent());
-            lv_label_set_text_fmt(screen2_confirm_type_label, "Type: %s", getBatteryChemistryName(selected_profile));
+            // Update confirmation popup with selected profile details (TV and TC)
+            // Use sprintf to properly format float values
+            char tv_str[50];
+            char tc_str[50];
+            char battery_info_str[100];
+            
+            sprintf(tv_str, "TV: %.1f V", selected_profile->getCutoffVoltage());
+            sprintf(tc_str, "TC: %.1f A", selected_profile->getConstCurrent());
+            sprintf(battery_info_str, "%d V, %d Ah", selected_profile->getRatedVoltage(), selected_profile->getRatedAh());
+            
+            lv_label_set_text(screen2_confirm_battery_info_label, battery_info_str);
+            lv_label_set_text(screen2_confirm_voltage_label, tv_str);
+            lv_label_set_text(screen2_confirm_capacity_label, tc_str);
+            lv_label_set_text(screen2_confirm_current_label, "");  // Hide unused label
+            lv_label_set_text(screen2_confirm_type_label, "");  // Hide unused label
 
             // Show confirmation popup and bring it to foreground
             lv_obj_clear_flag(screen2_confirm_popup, LV_OBJ_FLAG_HIDDEN);
@@ -1448,26 +1554,49 @@ void home_button_event_handler(lv_event_t * e) {
     if(code == LV_EVENT_CLICKED) {
         Serial.println("[HOME] Home button pressed");
         
-        // Reset stop reason
-        charge_stop_reason = CHARGE_STOP_NONE;
-        
-        // Reset timer variables
-        charging_start_time = 0;
-        cv_start_time = 0;
-        cc_state_duration_for_timer = 0;
-        pending_stop_command = false;  // Reset stop command flag
-        
         // Check if battery is still connected
         if (battery_detected && sensorData.volt >= 9.0f) {
-            // Battery still connected - go to battery detected screen
-            Serial.println("[HOME] Battery still connected, switching to battery detected screen");
-            current_app_state = STATE_BATTERY_DETECTED;
-            switch_to_screen(SCREEN_BATTERY_DETECTED);
+            // Battery still connected - show message to remove battery
+            Serial.println("[HOME] Battery still connected, showing remove battery message");
+            
+            // Show popup on current screen (6 or 7)
+            if (current_screen_id == SCREEN_CHARGING_COMPLETE && screen6_remove_battery_popup != nullptr) {
+                lv_obj_clear_flag(screen6_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_move_foreground(screen6_remove_battery_popup);
+            } else if (current_screen_id == SCREEN_EMERGENCY_STOP && screen7_remove_battery_popup != nullptr) {
+                lv_obj_clear_flag(screen7_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_move_foreground(screen7_remove_battery_popup);
+            }
+            // Don't navigate - stay on current screen until battery is removed
         } else {
-            // Battery removed - go to home screen
+            // Battery removed - proceed with navigation to home
             Serial.println("[HOME] Battery removed, switching to home screen");
-            current_app_state = STATE_HOME;
+            
+            // Hide popups if visible
+            if (screen6_remove_battery_popup != nullptr) {
+                lv_obj_add_flag(screen6_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);
+            }
+            if (screen7_remove_battery_popup != nullptr) {
+                lv_obj_add_flag(screen7_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);
+            }
+            
+            // Reset stop reason
+            charge_stop_reason = CHARGE_STOP_NONE;
+            
+            // Reset timer variables
+            charging_start_time = 0;
+            cv_start_time = 0;
+            cc_state_duration_for_timer = 0;
+            pending_stop_command = false;  // Reset stop command flag
+            
+            // Ensure battery_detected is false
             battery_detected = false;
+            
+            // Clear selected battery profile - user must select again from scratch
+            selected_battery_profile = nullptr;
+            
+            // Navigate to home screen
+            current_app_state = STATE_HOME;
             switch_to_screen(SCREEN_HOME);
         }
     }
@@ -1489,7 +1618,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v1.0");
+    lv_label_set_text(title, "GCU 3kW Charger v2.5");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -1638,7 +1767,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v1.0");
+    lv_label_set_text(title, "GCU 3kW Charger v2.5");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -1700,6 +1829,14 @@ void create_screen_2(void) {
     // Add M2 state status box - screen 2
     createM2StateBox(screen_2, "screen_2");
 
+    // Confirmed battery label (below table, above buttons) - hidden by default
+    screen2_confirmed_battery_label = lv_label_create(screen_2);
+    lv_label_set_text(screen2_confirmed_battery_label, "");
+    lv_obj_set_style_text_font(screen2_confirmed_battery_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen2_confirmed_battery_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_align(screen2_confirmed_battery_label, LV_ALIGN_TOP_LEFT, 12, 210);  // Below table (table is at y=110, ~100px tall)
+    lv_obj_add_flag(screen2_confirmed_battery_label, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
+
     // Display 0V battery profiles by default during screen creation
     // Will be refreshed with actual voltage when screen is navigated to
     displayMatchingBatteryProfiles(0.0f, screen2_battery_container);
@@ -1721,30 +1858,37 @@ void create_screen_2(void) {
     lv_obj_set_style_text_color(screen2_confirm_title_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen2_confirm_title_label, LV_ALIGN_TOP_MID, 0, 20);
 
-    // Voltage label (30pt - large and bold-looking)
+    // Battery info label (voltage and Ah) - above TV/TC
+    screen2_confirm_battery_info_label = lv_label_create(screen2_confirm_popup);
+    lv_label_set_text(screen2_confirm_battery_info_label, "-- V, -- Ah");
+    lv_obj_set_style_text_font(screen2_confirm_battery_info_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen2_confirm_battery_info_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_align(screen2_confirm_battery_info_label, LV_ALIGN_TOP_MID, 0, 60);
+
+    // Target Voltage label (TV) - 30pt - large and bold-looking
     screen2_confirm_voltage_label = lv_label_create(screen2_confirm_popup);
-    lv_label_set_text(screen2_confirm_voltage_label, "Voltage: -- V");
+    lv_label_set_text(screen2_confirm_voltage_label, "Target Voltage: -- V");
     lv_obj_set_style_text_font(screen2_confirm_voltage_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_voltage_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen2_confirm_voltage_label, LV_ALIGN_TOP_MID, 0, 80);
+    lv_obj_align(screen2_confirm_voltage_label, LV_ALIGN_TOP_MID, 0, 100);
 
-    // Capacity label (30pt - large and bold-looking)
+    // Target Current label (TC) - 30pt - large and bold-looking
     screen2_confirm_capacity_label = lv_label_create(screen2_confirm_popup);
-    lv_label_set_text(screen2_confirm_capacity_label, "Capacity: -- Ah");
+    lv_label_set_text(screen2_confirm_capacity_label, "Target Current: -- A");
     lv_obj_set_style_text_font(screen2_confirm_capacity_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_capacity_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen2_confirm_capacity_label, LV_ALIGN_TOP_MID, 0, 140);
+    lv_obj_align(screen2_confirm_capacity_label, LV_ALIGN_TOP_MID, 0, 150);
 
-    // Current label (26pt)
+    // Current label (unused, hidden)
     screen2_confirm_current_label = lv_label_create(screen2_confirm_popup);
-    lv_label_set_text(screen2_confirm_current_label, "Current: -- A");
+    lv_label_set_text(screen2_confirm_current_label, "");
     lv_obj_set_style_text_font(screen2_confirm_current_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_current_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen2_confirm_current_label, LV_ALIGN_TOP_MID, 0, 210);
 
-    // Type label (26pt)
+    // Type label (unused, hidden)
     screen2_confirm_type_label = lv_label_create(screen2_confirm_popup);
-    lv_label_set_text(screen2_confirm_type_label, "Type: --");
+    lv_label_set_text(screen2_confirm_type_label, "");
     lv_obj_set_style_text_font(screen2_confirm_type_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_type_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen2_confirm_type_label, LV_ALIGN_TOP_MID, 0, 270);
@@ -2074,6 +2218,23 @@ void create_screen_6(void) {
     lv_obj_set_style_text_color(screen6_home_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen6_home_label);
 
+    // Create remove battery popup for screen 6
+    screen6_remove_battery_popup = lv_obj_create(screen_6);
+    lv_obj_set_size(screen6_remove_battery_popup, 700, 300);
+    lv_obj_center(screen6_remove_battery_popup);
+    lv_obj_set_style_bg_color(screen6_remove_battery_popup, lv_color_hex(0xFFE4B5), LV_PART_MAIN);  // Moccasin background
+    lv_obj_set_style_border_width(screen6_remove_battery_popup, 4, LV_PART_MAIN);
+    lv_obj_set_style_border_color(screen6_remove_battery_popup, lv_color_hex(0xFF6600), LV_PART_MAIN);  // Orange border
+    lv_obj_set_style_radius(screen6_remove_battery_popup, 15, LV_PART_MAIN);
+    lv_obj_add_flag(screen6_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
+    
+    screen6_remove_battery_label = lv_label_create(screen6_remove_battery_popup);
+    lv_label_set_text(screen6_remove_battery_label, "Please remove the battery\nbefore returning to home screen");
+    lv_obj_set_style_text_font(screen6_remove_battery_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen6_remove_battery_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red text
+    lv_obj_set_style_text_align(screen6_remove_battery_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_center(screen6_remove_battery_label);
+
     // Note: Screen loading is handled by switch_to_screen()
     Serial.println("[SCREEN] Screen 6 (Charging Complete) created successfully");
 }
@@ -2143,6 +2304,23 @@ void create_screen_7(void) {
     lv_obj_set_style_text_font(screen7_home_label, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen7_home_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen7_home_label);
+
+    // Create remove battery popup for screen 7
+    screen7_remove_battery_popup = lv_obj_create(screen_7);
+    lv_obj_set_size(screen7_remove_battery_popup, 700, 300);
+    lv_obj_center(screen7_remove_battery_popup);
+    lv_obj_set_style_bg_color(screen7_remove_battery_popup, lv_color_hex(0xFFE4B5), LV_PART_MAIN);  // Moccasin background
+    lv_obj_set_style_border_width(screen7_remove_battery_popup, 4, LV_PART_MAIN);
+    lv_obj_set_style_border_color(screen7_remove_battery_popup, lv_color_hex(0xFF6600), LV_PART_MAIN);  // Orange border
+    lv_obj_set_style_radius(screen7_remove_battery_popup, 15, LV_PART_MAIN);
+    lv_obj_add_flag(screen7_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
+    
+    screen7_remove_battery_label = lv_label_create(screen7_remove_battery_popup);
+    lv_label_set_text(screen7_remove_battery_label, "Please remove the battery\nbefore returning to home screen");
+    lv_obj_set_style_text_font(screen7_remove_battery_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen7_remove_battery_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red text
+    lv_obj_set_style_text_align(screen7_remove_battery_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_center(screen7_remove_battery_label);
 
     // Note: Screen loading is handled by switch_to_screen()
     Serial.println("[SCREEN] Screen 7 (Emergency Stop) created successfully");

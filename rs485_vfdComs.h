@@ -34,7 +34,8 @@
 
 /* Frequency limits (in 0.01Hz units) - 3kW: max 300Hz, min 30Hz */
 #define RS485_FREQ_MAX            (30000)  // 300.00 Hz
-#define RS485_FREQ_MIN            (3000)   // 30.00 Hz
+//#define RS485_FREQ_MIN            (3000)   // 30.00 Hz
+#define RS485_FREQ_MIN            (4500)   // 45.00 Hz
 
 /* Error thresholds (in 0.01A or 0.01V units) - adjust based on your sensor scaling */
 #define RS485_ERROR_CURRENT_VERY_LARGE (2000)  // 20.00A difference -> 200Hz step

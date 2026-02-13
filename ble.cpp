@@ -42,6 +42,16 @@ void BLEManager::NetworkInfoCallbacks::onWrite(BLECharacteristic *pCharacteristi
     Serial.print(value.length());
     Serial.println(" bytes");
     
+    // Check for OTA_START command
+    value.trim();
+    if (value.equalsIgnoreCase("OTA_START") || value.equalsIgnoreCase("|OTA_START")) {
+        Serial.println("[NETWORK_INFO] OTA_START command received!");
+        Serial.println("[NETWORK_INFO] Triggering SoftAP mode for OTA update...");
+        trigger_ota_mode();
+        Serial.println("[NETWORK_INFO] ========================================");
+        return;
+    }
+    
     // Parse format: "SSID|password|CONNECT" (handles spaces around delimiters)
     int firstDelimiter = value.indexOf('|');
     if (firstDelimiter > 0) {

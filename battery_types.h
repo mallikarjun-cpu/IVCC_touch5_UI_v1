@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <lvgl.h>
 
-// ============================================================================
+// ============================================================0================
 // Battery Type Class Definition
 // ============================================================================
 /*
@@ -106,7 +106,7 @@ public:
                 }
             }
         }
-        else if (detectedVoltage >= 21 && detectedVoltage < 30) {
+        else if (detectedVoltage >= 21 && detectedVoltage < 33) {
             // Show 24V Lead Acid and 28V Lithium options
             for (int i = 0; i < profileCount; i++) {
                 if ((profiles[i]->getRatedVoltage() == 24 && profiles[i]->getChemistry() == LEAD_ACID) ||
@@ -115,7 +115,7 @@ public:
                 }
             }
         }
-        else if (detectedVoltage >= 30 && detectedVoltage < 42) {
+        else if (detectedVoltage >= 33 && detectedVoltage < 42) {
             // Show 36V options
             for (int i = 0; i < profileCount; i++) {
                 if (profiles[i]->getRatedVoltage() == 36) {

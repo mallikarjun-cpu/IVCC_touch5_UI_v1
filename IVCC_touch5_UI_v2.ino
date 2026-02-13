@@ -144,7 +144,7 @@ void setup()
     bleManager.init();
     Serial.println("BLE initialized successfully");
 
-    Serial.println("End of setup, setup success! ------------  \n -----");
+    Serial.println("End of setup, setup success! ------ v2.5------  \n -----");
 }
 
 void loop()
@@ -170,6 +170,9 @@ void loop()
 
     // Process reboot countdown if active
     process_reboot_countdown();
+
+    // Handle OTA server requests if active
+    handle_ota_requests();
 
     delay(200);
 }

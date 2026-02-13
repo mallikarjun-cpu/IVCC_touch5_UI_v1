@@ -243,14 +243,17 @@ void rs485_init(void) {
     Serial2.begin(RS485_BAUD_RATE, SERIAL_8N1, RS485_RX, RS485_TX);
 
     // Small delay for initialization
-    delay(100);
+    delay(90);
+    //send a stop command to the vfd
+    rs485_sendStopCommand();
+    delay(10);
 
     // Send startup message on RS485 bus
     const char* startup_msg = "hello from touchUI 5 inch";
     Serial2.print(startup_msg);
     Serial2.flush();
 
-    Serial.println("RS485 interface initialized (TX only)");
+    Serial.println("RS485 interface initialized (TX only), Stop cmd sent to vfd ");
     Serial.print("TX Pin: ");
     Serial.print(RS485_TX);
     Serial.print(", RX Pin: ");
