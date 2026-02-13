@@ -60,6 +60,7 @@ lv_obj_t* screen_4 = nullptr; //screen 4 - Constant Current (CC) mode
 lv_obj_t* screen_5 = nullptr; //screen 5 - Constant Voltage (CV) mode
 lv_obj_t* screen_6 = nullptr; //screen 6 - Charging complete
 lv_obj_t* screen_7 = nullptr; //screen 7 - Emergency stop
+lv_obj_t* screen_8 = nullptr; //screen 8 - Voltage saturation detected
 lv_obj_t* screen_13 = nullptr; //screen 13 - CAN debug screen
 lv_obj_t* screen_16 = nullptr; //screen 16 - Time debug screen
 lv_obj_t* screen_17 = nullptr; //screen 17 - BLE debug screen
@@ -71,11 +72,12 @@ static lv_obj_t* data_table = nullptr;  // Shared table shown on all screens
 static lv_obj_t* screen2_battery_container = nullptr;
 static lv_obj_t* screen2_button_container = nullptr;
 
-// Selected battery profile for screen 3, 4, 5 display
+// Selected battery profile for screen 3, 4, 5, 8 display
 static BatteryType* selected_battery_profile = nullptr;
 static lv_obj_t* screen3_battery_details_label = nullptr;
 static lv_obj_t* screen4_battery_details_label = nullptr;
 static lv_obj_t* screen5_battery_details_label = nullptr;
+static lv_obj_t* screen8_battery_details_label = nullptr;
 
 // Timer variables for charging screens
 static unsigned long charging_start_time = 0;  // When charging started (screen 3)
@@ -90,12 +92,13 @@ static bool pending_stop_command = false;  // Flag to send stop command after sc
 static float accumulated_ah = 0.0f;  // Accumulated Ah (default 0.0)
 static unsigned long last_ah_update_time = 0;  // Last time Ah was updated (for rate limiting)
 
-// Timer table objects for screens 3, 4, 5, 6, 7
+// Timer table objects for screens 3, 4, 5, 6, 7, 8
 static lv_obj_t* screen3_timer_table = nullptr;
 static lv_obj_t* screen4_timer_table = nullptr;
 static lv_obj_t* screen5_timer_table = nullptr;
 static lv_obj_t* screen6_timer_table = nullptr;
 static lv_obj_t* screen7_timer_table = nullptr;
+static lv_obj_t* screen8_timer_table = nullptr;
 
 // screen 2 confirmation popup
 static lv_obj_t* screen2_confirm_popup = nullptr;
@@ -112,6 +115,7 @@ static lv_obj_t* screen2_confirm_change_btn = nullptr;
 static lv_obj_t* screen2_confirmed_battery_label = nullptr;
 
 // screen 6 and 7 remove battery popup
+static lv_obj_t* screen6_status_label = nullptr;  // Status label for screen 6 (dynamic based on stop reason)
 static lv_obj_t* screen6_remove_battery_popup = nullptr;
 static lv_obj_t* screen6_remove_battery_label = nullptr;
 static lv_obj_t* screen7_remove_battery_popup = nullptr;
@@ -159,6 +163,13 @@ static unsigned long last_control_update = 0;         // Rate limiting for charg
 static unsigned long cc_state_start_time = 0;         // Time when CC state started (millis)
 static unsigned long cv_state_start_time = 0;         // Time when CV state started (millis)
 static unsigned long cc_state_duration = 0;           // Duration spent in CC state (millis)
+
+// Voltage saturation detection variables (3kW)
+static float base_volt_satu_ref = 0.0f;              // Base voltage reference when entering CC stage
+static float present_volt_satu_check = 0.0f;         // Present voltage for saturation check
+static unsigned long last_voltage_saturation_check_time = 0;  // Last time voltage saturation was checked
+static float voltage_saturation_detected_voltage = 0.0f;      // Voltage when saturation was detected
+static unsigned long voltage_saturation_cv_start_time = 0;   // CV start time for screen 8 state
 
 // ============================================================================
 // M2 State Management Globals
@@ -320,6 +331,7 @@ void initialize_all_screens() {
     create_screen_5();   // CV mode screen
     create_screen_6();   // Charging complete screen
     create_screen_7();   // Emergency stop screen
+    create_screen_8();   // Voltage saturation detected screen
     create_screen_13();  // CAN debug screen
     create_screen_16();  // Time debug screen
     create_screen_17();  // BLE debug screen
@@ -356,6 +368,9 @@ void switch_to_screen(screen_id_t screen_id) {
             break;
         case SCREEN_EMERGENCY_STOP:
             target_screen = screen_7;
+            break;
+        case SCREEN_VOLTAGE_SATURATION:
+            target_screen = screen_8;
             break;
         case SCREEN_CAN_DEBUG:
             target_screen = screen_13;
@@ -451,7 +466,8 @@ void update_charging_control() {
     // Only run in charging states
     if (current_app_state != STATE_CHARGING_START && 
         current_app_state != STATE_CHARGING_CC && 
-        current_app_state != STATE_CHARGING_CV) {
+        current_app_state != STATE_CHARGING_CV &&
+        current_app_state != STATE_CHARGING_VOLTAGE_SATURATION) {
         return;
     }
     
@@ -513,6 +529,13 @@ void update_charging_control() {
             current_app_state = STATE_CHARGING_CC;
             cc_state_start_time = millis();  // Record CC state start time
             Serial.println("[CHARGING] CC state timing started");
+            
+            // Initialize voltage saturation tracking on CC entry
+            base_volt_satu_ref = safe_actual_voltage;  // Record base voltage reference
+            present_volt_satu_check = 0.0f;  // Reset present voltage check
+            last_voltage_saturation_check_time = millis();  // Initialize check time
+            Serial.printf("[VOLT_SAT] CC entry: base_volt_satu_ref = %.2fV\n", base_volt_satu_ref);
+            
             // Screen switch will happen in determine_screen_from_state()
         }
     }
@@ -536,6 +559,54 @@ void update_charging_control() {
         // Send frequency command
         rs485_sendFrequencyCommand(new_frequency);
         current_frequency = new_frequency;
+        
+        // Voltage saturation check: Check every xx1 minutes (VOLTAGE_SATURATION_CHECK_INTERVAL_MS)
+        unsigned long current_time = millis();
+        if (last_voltage_saturation_check_time > 0 && 
+            (current_time - last_voltage_saturation_check_time) >= VOLTAGE_SATURATION_CHECK_INTERVAL_MS) {
+            
+            // Time to check for voltage saturation
+            present_volt_satu_check = safe_actual_voltage;  // Record present voltage
+            float voltage_difference = present_volt_satu_check - base_volt_satu_ref;
+            
+            Serial.printf("[VOLT_SAT] Check: base=%.2fV, present=%.2fV, diff=%.2fV\n", 
+                         base_volt_satu_ref, present_volt_satu_check, voltage_difference);
+            
+            if (voltage_difference > VOLTAGE_SATURATION_THRESHOLD_V) {
+                // Voltage increased by more than 0.5V - no saturation, continue CC
+                Serial.println("[VOLT_SAT] Voltage increased > 0.5V, no saturation detected. Continuing CC stage.");
+                base_volt_satu_ref = present_volt_satu_check;  // Update base reference
+                present_volt_satu_check = 0.0f;  // Reset present check
+                last_voltage_saturation_check_time = current_time;  // Reset check timer
+            } else {
+                // Voltage increase <= 0.5V (or negative) - saturation detected
+                Serial.printf("[VOLT_SAT] Saturation detected! Voltage diff=%.2fV <= %.2fV\n", 
+                             voltage_difference, VOLTAGE_SATURATION_THRESHOLD_V);
+                Serial.printf("[VOLT_SAT] Recording saturation voltage: %.2fV\n", present_volt_satu_check);
+                
+                // Record the saturation voltage
+                voltage_saturation_detected_voltage = present_volt_satu_check;
+                
+                // Transition to voltage saturation state (Screen 8)
+                current_app_state = STATE_CHARGING_VOLTAGE_SATURATION;
+                voltage_saturation_cv_start_time = millis();  // Record CV start time for screen 8
+                Serial.println("[VOLT_SAT] Transitioning to voltage saturation state (Screen 8)");
+                
+                // Immediately calculate and send CV frequency command using saturation voltage
+                uint16_t saturation_voltage_0_01V = (uint16_t)(voltage_saturation_detected_voltage * 100);
+                uint16_t sat_cv_frequency = rs485_CalcFrequencyFor_CV(
+                    current_frequency, 
+                    saturation_voltage_0_01V, 
+                    actual_voltage_0_01V
+                );
+                rs485_sendFrequencyCommand(sat_cv_frequency);
+                current_frequency = sat_cv_frequency;
+                Serial.println("[VOLT_SAT] CV frequency command sent immediately on saturation transition");
+                
+                // Screen switch will happen in determine_screen_from_state()
+                return;  // Exit early, don't check normal voltage transition
+            }
+        }
         
         // Check if voltage >= target voltage, then transition to CV state
         if (safe_actual_voltage >= target_voltage) {
@@ -669,6 +740,75 @@ void update_charging_control() {
             switch_to_screen(SCREEN_CHARGING_COMPLETE);
         }
     }
+    else if (current_app_state == STATE_CHARGING_VOLTAGE_SATURATION) {
+        // STATE_CHARGING_VOLTAGE_SATURATION: Constant Voltage mode using saturation voltage as target
+        // Use the recorded saturation voltage as target instead of battery profile cutoff voltage
+        uint16_t saturation_voltage_0_01V = (uint16_t)(voltage_saturation_detected_voltage * 100);
+        
+        new_frequency = rs485_CalcFrequencyFor_CV(
+            current_frequency, 
+            saturation_voltage_0_01V, 
+            actual_voltage_0_01V
+        );
+        
+        // Debug logging
+        #if ACTUAL_TARGET_CC_CV_debug
+        int32_t voltage_error = (int32_t)actual_voltage_0_01V - (int32_t)saturation_voltage_0_01V;
+        Serial.printf("[CHARGING_VOLT_SAT] Target: %.2fV, Actual: %.2fV, Error: %d (0.01V), Freq: %d -> %d (%.2f Hz -> %.2f Hz)\n",
+            voltage_saturation_detected_voltage, safe_actual_voltage, voltage_error,
+            current_frequency, new_frequency,
+            current_frequency / 100.0f, new_frequency / 100.0f);
+        #endif
+        
+        // Send frequency command
+        rs485_sendFrequencyCommand(new_frequency);
+        current_frequency = new_frequency;
+        
+        // Termination condition: Check if CV duration has reached xx2 minutes (VOLTAGE_SATURATION_CV_DURATION_MS)
+        unsigned long current_time = millis();
+        unsigned long sat_cv_duration = 0;
+        if (voltage_saturation_cv_start_time > 0) {
+            sat_cv_duration = current_time - voltage_saturation_cv_start_time;
+        }
+        
+        bool sat_cv_time_complete = (sat_cv_duration >= VOLTAGE_SATURATION_CV_DURATION_MS);
+        
+        if (sat_cv_time_complete) {
+            Serial.println("[CHARGING] Voltage saturation CV charging complete (xx2 minutes elapsed)!");
+            
+            // STEP 1: Send 0 RPM command IMMEDIATELY when condition is met
+            Serial.println("[CHARGING] Sending 0 RPM command immediately...");
+            rs485_sendFrequencyCommand(0);  // Send 0 Hz
+            current_frequency = 0;
+            delay(10);  // Give RS485 time to send the command
+            
+            // STEP 2: Now do other things (logging, calculations, etc.)
+            // Calculate total charging time
+            if (charging_start_time > 0) {
+                final_charging_time_ms = current_time - charging_start_time;
+                charging_complete = true;
+                Serial.printf("[CHARGING] Final charging time: %lu ms (%.2f minutes)\n", 
+                             final_charging_time_ms, final_charging_time_ms / 60000.0f);
+            }
+            
+            // Open contactor via CAN bus
+            Serial.println("[CONTACTOR] Opening contactor on charging complete...");
+            send_contactor_control(CONTACTOR_OPEN);
+            
+            // Set stop reason to voltage saturation
+            charge_stop_reason = CHARGE_STOP_VOLTAGE_SATURATION;
+            
+            // Transition to complete state
+            current_app_state = STATE_CHARGING_COMPLETE;
+            Serial.println("[CHARGING] Transitioned to charging complete state (voltage saturation)");
+            
+            // Set flag to send stop command after screen 6 loads
+            pending_stop_command = true;
+            
+            // STEP 3: Move to screen 6
+            switch_to_screen(SCREEN_CHARGING_COMPLETE);
+        }
+    }
 }
 
 // Update current screen content (screen-specific updates)
@@ -738,7 +878,7 @@ void update_current_screen() {
         }
     }
     
-    // Update battery details on screens 3, 4, 5
+    // Update battery details on screens 3, 4, 5, 8
     if (screen3_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
         if (selected_battery_profile != nullptr) {
             char details_text[100];
@@ -775,8 +915,40 @@ void update_current_screen() {
             lv_label_set_text(screen5_battery_details_label, "Selected Battery: None");
         }
     }
+    if (screen8_battery_details_label != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
+        if (selected_battery_profile != nullptr) {
+            char details_text[150];
+            sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)\nSaturation Voltage: %.2f V",
+                    selected_battery_profile->getDisplayName().c_str(),
+                    selected_battery_profile->getCutoffVoltage(),
+                    selected_battery_profile->getConstCurrent(),
+                    voltage_saturation_detected_voltage);
+            lv_label_set_text(screen8_battery_details_label, details_text);
+        } else {
+            lv_label_set_text(screen8_battery_details_label, "Selected Battery: None");
+        }
+    }
     
-    // Update timer displays on screens 3, 4, 5, 6, 7
+    // Update screen 6 status label based on charge stop reason
+    if (screen6_status_label != nullptr && current_screen_id == SCREEN_CHARGING_COMPLETE) {
+        if (charge_stop_reason == CHARGE_STOP_VOLTAGE_SATURATION) {
+            lv_label_set_text(screen6_status_label, "Charge stopped due to voltage saturate!");
+            lv_obj_set_style_text_color(screen6_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
+        } else if (charge_stop_reason == CHARGE_STOP_COMPLETE) {
+            lv_label_set_text(screen6_status_label, "Battery charging completed successfully");
+            lv_obj_set_style_text_color(screen6_status_label, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
+        } else if (charge_stop_reason == CHARGE_STOP_EMERGENCY) {
+            // This shouldn't happen on screen 6, but handle it just in case
+            lv_label_set_text(screen6_status_label, "Charging stopped by user");
+            lv_obj_set_style_text_color(screen6_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
+        } else {
+            // Default message
+            lv_label_set_text(screen6_status_label, "Battery charging completed successfully");
+            lv_obj_set_style_text_color(screen6_status_label, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
+        }
+    }
+    
+    // Update timer displays on screens 3, 4, 5, 6, 7, 8
     lvgl_port_lock(-1);  // Lock LVGL for thread safety
     
     unsigned long total_elapsed = 0;
@@ -792,7 +964,7 @@ void update_current_screen() {
     char ah_str[20];
     sprintf(ah_str, "%.1f", accumulated_ah);
     
-    // Update Ah display on screens 3, 4, 5 (always, not just when time > 0)
+    // Update Ah display on screens 3, 4, 5, 8 (always, not just when time > 0)
     if (!charging_complete) {
         if (screen3_timer_table != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
             lv_table_set_cell_value(screen3_timer_table, 1, 2, ah_str);
@@ -802,6 +974,9 @@ void update_current_screen() {
         }
         if (screen5_timer_table != nullptr && current_screen_id == SCREEN_CHARGING_CV) {
             lv_table_set_cell_value(screen5_timer_table, 1, 2, ah_str);
+        }
+        if (screen8_timer_table != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
+            lv_table_set_cell_value(screen8_timer_table, 1, 2, ah_str);
         }
     }
     
@@ -815,7 +990,7 @@ void update_current_screen() {
         char time_str[20];
         sprintf(time_str, "%02lu:%02lu:%02lu", total_hours, total_minutes, total_seconds);
         
-        // Update total time on screens 3, 4, 5 (only if charging in progress)
+        // Update total time on screens 3, 4, 5, 8 (only if charging in progress)
         if (!charging_complete) {
             if (screen3_timer_table != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
                 lv_table_set_cell_value(screen3_timer_table, 1, 0, time_str);
@@ -846,6 +1021,25 @@ void update_current_screen() {
                     } else {
                         lv_table_set_cell_value(screen5_timer_table, 1, 1, "00:00");
                     }
+                }
+            }
+            if (screen8_timer_table != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
+                lv_table_set_cell_value(screen8_timer_table, 1, 0, time_str);
+                
+                // Also update remaining time on screen 8 (voltage saturation CV state)
+                if (voltage_saturation_cv_start_time > 0) {
+                    unsigned long sat_cv_elapsed = millis() - voltage_saturation_cv_start_time;
+                    unsigned long remaining_time_ms = (VOLTAGE_SATURATION_CV_DURATION_MS > sat_cv_elapsed) ? 
+                                                      (VOLTAGE_SATURATION_CV_DURATION_MS - sat_cv_elapsed) : 0;
+                    
+                    unsigned long rem_seconds = remaining_time_ms / 1000;
+                    unsigned long rem_minutes = rem_seconds / 60;
+                    rem_seconds = rem_seconds % 60;
+                    sprintf(time_str, "%02lu:%02lu", rem_minutes, rem_seconds);
+                    lv_table_set_cell_value(screen8_timer_table, 1, 1, time_str);
+                } else {
+                    // If voltage_saturation_cv_start_time not set yet, show default
+                    lv_table_set_cell_value(screen8_timer_table, 1, 1, "--:--");
                 }
             }
         }
@@ -886,6 +1080,9 @@ screen_id_t determine_screen_from_state() {
     }
     if (current_app_state == STATE_CHARGING_CV) {
         return SCREEN_CHARGING_CV;
+    }
+    if (current_app_state == STATE_CHARGING_VOLTAGE_SATURATION) {
+        return SCREEN_VOLTAGE_SATURATION;
     }
     if (current_app_state == STATE_CHARGING_COMPLETE) {
         return SCREEN_CHARGING_COMPLETE;
@@ -1455,6 +1652,13 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         cc_state_duration = 0;    // Reset CC duration
         cc_state_duration_for_timer = 0;  // Reset for timer calculation
         
+        // Reset voltage saturation tracking variables
+        base_volt_satu_ref = 0.0f;
+        present_volt_satu_check = 0.0f;
+        last_voltage_saturation_check_time = 0;
+        voltage_saturation_detected_voltage = 0.0f;
+        voltage_saturation_cv_start_time = 0;
+        
         // Initialize charging start time and reset completion flag
         charging_start_time = millis();
         charging_complete = false;
@@ -1618,7 +1822,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v2.5");
+    lv_label_set_text(title, "GCU 3kW Charger v2.6");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -1767,7 +1971,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v2.5");
+    lv_label_set_text(title, "GCU 3kW Charger v2.6");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -1972,9 +2176,9 @@ void create_screen_3(void) {
     lv_table_set_cell_value(screen3_timer_table, 1, 2, "0.0");
     lv_obj_set_style_bg_color(screen3_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen3_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
-    lv_obj_set_style_border_width(screen3_timer_table, 1, LV_PART_ITEMS);
-    lv_obj_set_style_text_font(screen3_timer_table, &lv_font_montserrat_22, LV_PART_ITEMS);
-    lv_obj_align(screen3_timer_table, LV_ALIGN_TOP_LEFT, 12, 330);  // Moved up 30px (360 -> 330)
+    lv_obj_set_style_border_width(screen3_timer_table, 3, LV_PART_ITEMS);  // Thick black border
+    lv_obj_set_style_text_font(screen3_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
+    lv_obj_align(screen3_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen3_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 3
@@ -2050,9 +2254,9 @@ void create_screen_4(void) {
     lv_table_set_cell_value(screen4_timer_table, 1, 2, "0.0");
     lv_obj_set_style_bg_color(screen4_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen4_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
-    lv_obj_set_style_border_width(screen4_timer_table, 1, LV_PART_ITEMS);
-    lv_obj_set_style_text_font(screen4_timer_table, &lv_font_montserrat_22, LV_PART_ITEMS);
-    lv_obj_align(screen4_timer_table, LV_ALIGN_TOP_LEFT, 12, 330);  // Moved up 30px (360 -> 330)
+    lv_obj_set_style_border_width(screen4_timer_table, 3, LV_PART_ITEMS);  // Thick black border
+    lv_obj_set_style_text_font(screen4_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
+    lv_obj_align(screen4_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen4_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 4
@@ -2127,9 +2331,9 @@ void create_screen_5(void) {
     lv_table_set_cell_value(screen5_timer_table, 1, 2, "0.0");
     lv_obj_set_style_bg_color(screen5_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen5_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
-    lv_obj_set_style_border_width(screen5_timer_table, 1, LV_PART_ITEMS);
-    lv_obj_set_style_text_font(screen5_timer_table, &lv_font_montserrat_22, LV_PART_ITEMS);
-    lv_obj_align(screen5_timer_table, LV_ALIGN_TOP_LEFT, 12, 330);  // Moved up 30px (360 -> 330)
+    lv_obj_set_style_border_width(screen5_timer_table, 3, LV_PART_ITEMS);  // Thick black border
+    lv_obj_set_style_text_font(screen5_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
+    lv_obj_align(screen5_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen5_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 5
@@ -2169,12 +2373,12 @@ void create_screen_6(void) {
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
 
-    // Status label
-    lv_obj_t *status_label_6 = lv_label_create(screen_6);
-    lv_label_set_text(status_label_6, "Battery charging completed successfully");
-    lv_obj_set_style_text_color(status_label_6, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
-    lv_obj_set_style_text_font(status_label_6, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_align(status_label_6, LV_ALIGN_TOP_MID, 0, 60);
+    // Status label (will be updated dynamically based on charge_stop_reason)
+    screen6_status_label = lv_label_create(screen_6);
+    lv_label_set_text(screen6_status_label, "Battery charging completed successfully");
+    lv_obj_set_style_text_color(screen6_status_label, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
+    lv_obj_set_style_text_font(screen6_status_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(screen6_status_label, LV_ALIGN_TOP_MID, 0, 60);
 
     // Move shared data table to screen_6
     if (data_table != nullptr) {
@@ -2197,9 +2401,9 @@ void create_screen_6(void) {
     lv_table_set_cell_value(screen6_timer_table, 1, 2, "0.0");
     lv_obj_set_style_bg_color(screen6_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen6_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
-    lv_obj_set_style_border_width(screen6_timer_table, 1, LV_PART_ITEMS);
-    lv_obj_set_style_text_font(screen6_timer_table, &lv_font_montserrat_22, LV_PART_ITEMS);
-    lv_obj_align(screen6_timer_table, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
+    lv_obj_set_style_border_width(screen6_timer_table, 3, LV_PART_ITEMS);  // Thick black border
+    lv_obj_set_style_text_font(screen6_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
+    lv_obj_align(screen6_timer_table, LV_ALIGN_TOP_MID, 0, 270);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen6_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 6
@@ -2284,9 +2488,9 @@ void create_screen_7(void) {
     lv_table_set_cell_value(screen7_timer_table, 1, 2, "0.0");
     lv_obj_set_style_bg_color(screen7_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen7_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
-    lv_obj_set_style_border_width(screen7_timer_table, 1, LV_PART_ITEMS);
-    lv_obj_set_style_text_font(screen7_timer_table, &lv_font_montserrat_22, LV_PART_ITEMS);
-    lv_obj_align(screen7_timer_table, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
+    lv_obj_set_style_border_width(screen7_timer_table, 3, LV_PART_ITEMS);  // Thick black border
+    lv_obj_set_style_text_font(screen7_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
+    lv_obj_align(screen7_timer_table, LV_ALIGN_TOP_MID, 0, 270);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen7_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
     // Add M2 state status box - screen 7
@@ -2324,6 +2528,83 @@ void create_screen_7(void) {
 
     // Note: Screen loading is handled by switch_to_screen()
     Serial.println("[SCREEN] Screen 7 (Emergency Stop) created successfully");
+}
+
+//screen 8 - Voltage saturation detected
+void create_screen_8(void) {
+    screen_8 = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen_8, lv_color_hex(0xD3D3D3), LV_PART_MAIN);  // Light gray background
+    lv_obj_set_style_bg_opa(screen_8, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(screen_8, LV_OPA_COVER, LV_PART_MAIN);
+
+    // Screen NOT scrollable (fixed layout)
+    lv_obj_set_scroll_dir(screen_8, LV_DIR_NONE);  // No scrolling
+
+    // Title
+    lv_obj_t *title = lv_label_create(screen_8);
+    lv_label_set_text(title, "Voltage Saturation Detected");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+
+    // Status label (CV charging in progress with saturation voltage)
+    lv_obj_t *status_label_8 = lv_label_create(screen_8);
+    lv_label_set_text(status_label_8, "CV Charging at saturation voltage...");
+    lv_obj_set_style_text_color(status_label_8, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
+    lv_obj_set_style_text_font(status_label_8, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(status_label_8, LV_ALIGN_TOP_MID, 0, 60);
+
+    // Move shared data table to screen_8
+    if (data_table != nullptr) {
+        lv_obj_set_parent(data_table, screen_8);
+        lv_obj_set_pos(data_table, 12, 110);
+    }
+
+    // Battery profile details label (below table, moved up 30px)
+    screen8_battery_details_label = lv_label_create(screen_8);
+    lv_label_set_text(screen8_battery_details_label, "Selected Battery: --");
+    lv_obj_set_style_text_color(screen8_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen8_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_align(screen8_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
+    
+    // Timer table (3x2) for screen 8 - below battery label, left aligned
+    screen8_timer_table = lv_table_create(screen_8);
+    lv_table_set_col_cnt(screen8_timer_table, 3);
+    lv_table_set_row_cnt(screen8_timer_table, 2);
+    lv_table_set_col_width(screen8_timer_table, 0, 200);
+    lv_table_set_col_width(screen8_timer_table, 1, 200);
+    lv_table_set_col_width(screen8_timer_table, 2, 200);
+    lv_table_set_cell_value(screen8_timer_table, 0, 0, "Total Time");
+    lv_table_set_cell_value(screen8_timer_table, 0, 1, "Remaining");
+    lv_table_set_cell_value(screen8_timer_table, 0, 2, "Charged(Ah)");
+    lv_table_set_cell_value(screen8_timer_table, 1, 0, "00:00:00");
+    lv_table_set_cell_value(screen8_timer_table, 1, 1, "00:00");
+    lv_table_set_cell_value(screen8_timer_table, 1, 2, "0.0");
+    lv_obj_set_style_bg_color(screen8_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
+    lv_obj_set_style_border_color(screen8_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
+    lv_obj_set_style_border_width(screen8_timer_table, 3, LV_PART_ITEMS);  // Thick black border
+    lv_obj_set_style_text_font(screen8_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
+    lv_obj_align(screen8_timer_table, LV_ALIGN_TOP_MID, 0, 320);  // Centered horizontally, same vertical position
+    lv_obj_clear_flag(screen8_timer_table, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Add M2 state status box - screen 8
+    createM2StateBox(screen_8, "screen_8");
+
+    // Emergency Stop button (bottom mid, large and visible) - ALWAYS ENABLED
+    lv_obj_t* screen8_emergency_stop_btn = lv_btn_create(screen_8);
+    lv_obj_set_size(screen8_emergency_stop_btn, 200, 80);
+    lv_obj_align(screen8_emergency_stop_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_style_bg_color(screen8_emergency_stop_btn, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
+    lv_obj_add_event_cb(screen8_emergency_stop_btn, emergency_stop_event_handler, LV_EVENT_CLICKED, NULL);
+    lv_obj_clear_flag(screen8_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* screen8_emergency_stop_label = lv_label_create(screen8_emergency_stop_btn);
+    lv_label_set_text(screen8_emergency_stop_label, "EMERGENCY\nSTOP");
+    lv_obj_set_style_text_font(screen8_emergency_stop_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen8_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+    lv_obj_center(screen8_emergency_stop_label);
+
+    // Note: Screen loading is handled by switch_to_screen()
+    Serial.println("[SCREEN] Screen 8 (Voltage Saturation) created successfully");
 }
 
 

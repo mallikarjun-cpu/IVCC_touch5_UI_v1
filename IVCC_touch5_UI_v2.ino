@@ -144,7 +144,7 @@ void setup()
     bleManager.init();
     Serial.println("BLE initialized successfully");
 
-    Serial.println("End of setup, setup success! ------ v2.5------  \n -----");
+    Serial.println("End of setup, setup success! ------ v2.6------  \n -----");
 }
 
 void loop()

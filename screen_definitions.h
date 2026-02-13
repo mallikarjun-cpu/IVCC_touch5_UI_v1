@@ -8,6 +8,11 @@
 #define ACTUAL_TARGET_CC_CV_debug 0  // 1 = print, 0 = print off
 #define Ah_CALCULATION_DEBUG 0  // 1 = print, 0 = print off
 
+// Voltage saturation detection macros (3kW)
+#define VOLTAGE_SATURATION_CHECK_INTERVAL_MS (10 * 60 * 1000)  // xx1: 10 minutes in milliseconds
+#define VOLTAGE_SATURATION_CV_DURATION_MS (5 * 60 * 1000)     // xx2: 5 minutes in milliseconds
+#define VOLTAGE_SATURATION_THRESHOLD_V 0.5f                   // 0.5V threshold for saturation detection
+
 // Global screen objects
 extern lv_obj_t* screen_1;
 extern lv_obj_t* screen_2;
@@ -16,6 +21,7 @@ extern lv_obj_t* screen_4;
 extern lv_obj_t* screen_5;
 extern lv_obj_t* screen_6;
 extern lv_obj_t* screen_7;
+extern lv_obj_t* screen_8;
 extern lv_obj_t* screen_13;
 extern lv_obj_t* screen_16;
 extern lv_obj_t* screen_17;
@@ -29,6 +35,7 @@ typedef enum {
     SCREEN_CHARGING_CV,        // Screen 5 - Constant Voltage mode
     SCREEN_CHARGING_COMPLETE,  // Screen 6 - Charging complete
     SCREEN_EMERGENCY_STOP,     // Screen 7 - Emergency stop
+    SCREEN_VOLTAGE_SATURATION, // Screen 8 - Voltage saturation detected
     SCREEN_CAN_DEBUG,          // Screen 13 - CAN debug screen
     SCREEN_TIME_DEBUG = 16,    // Screen 16 - Time debug screen
     SCREEN_BLE_DEBUG = 17      // Screen 17 - BLE debug screen
@@ -40,6 +47,7 @@ typedef enum {
     STATE_CHARGING_START,         // Charging start (waiting for 1A current)
     STATE_CHARGING_CC,            // Constant Current mode
     STATE_CHARGING_CV,            // Constant Voltage mode
+    STATE_CHARGING_VOLTAGE_SATURATION, // Voltage saturation detected (CV with saturation voltage)
     STATE_CHARGING_COMPLETE,      // Charging complete
     STATE_EMERGENCY_STOP          // Emergency stop
 } app_state_t;
@@ -49,6 +57,7 @@ typedef enum {
     CHARGE_STOP_NONE = 0,              // No stop reason
     CHARGE_STOP_COMPLETE = 1,          // Charging complete (normal termination)
     CHARGE_STOP_EMERGENCY = 2,         // Emergency stop (user initiated)
+    CHARGE_STOP_VOLTAGE_SATURATION = 3, // Charge stopped due to voltage saturation
     // Future reasons can be added here
 } charge_stop_reason_t;
 
@@ -73,6 +82,7 @@ void create_screen_4(void); //screen 4 - Constant Current (CC) mode
 void create_screen_5(void); //screen 5 - Constant Voltage (CV) mode
 void create_screen_6(void); //screen 6 - Charging complete
 void create_screen_7(void); //screen 7 - Emergency stop
+void create_screen_8(void); //screen 8 - Voltage saturation detected
 void create_screen_13(void); //screen 13 - CAN debug screen
 void create_screen_16(void); //screen 16 - Time debug screen
 void create_screen_17(void); //screen 17 - BLE debug screen
