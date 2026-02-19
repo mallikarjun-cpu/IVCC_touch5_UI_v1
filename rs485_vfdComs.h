@@ -22,7 +22,7 @@
 
 /* Frequency calculation constants - 3kW VFD Configuration */
 /* Frequency step sizes (in 0.01Hz units) */
-#define RS485_CALC_FREQ_COND05    (200)    // 2.00Hz - Very large error step (20A+)
+#define RS485_CALC_FREQ_COND05    (400)    // 4.00Hz - Very large error step (20A+)
 #define RS485_CALC_FREQ_COND04    (100)    // 1.00Hz - Large error step (15-20A)
 #define RS485_CALC_FREQ_COND01    (50)     // 0.50Hz - Medium-large error step (7-15A)
 #define RS485_CALC_FREQ_COND02    (30)     // 0.30Hz - Medium error step (5-7A)

@@ -467,14 +467,10 @@ void update_charging_control() {
     if (current_app_state != STATE_CHARGING_START && 
         current_app_state != STATE_CHARGING_CC && 
         current_app_state != STATE_CHARGING_CV &&
-        current_app_state != STATE_CHARGING_VOLTAGE_SATURATION) {
-        return;
-    }
+        current_app_state != STATE_CHARGING_VOLTAGE_SATURATION) { return; }
     
     // Check if battery profile is selected
-    if (selected_battery_profile == nullptr) {
-        return;
-    }
+    if (selected_battery_profile == nullptr) { return; }
     
     // Rate limiting: update once per second
     const unsigned long CONTROL_UPDATE_INTERVAL = 1000; // 1 second
@@ -500,21 +496,18 @@ void update_charging_control() {
     
     uint16_t new_frequency = current_frequency;
     
-    // State-specific charging logic
+// State-specific charging logic
+    // [1] STATE_CHARGING_START: Maintain PRECHARGE_AMPS (2A) for PRECHARGE_TIME (3 minutes), then transition to CC
     if (current_app_state == STATE_CHARGING_START) {
-        // STATE_CHARGING_START: Wait until 1A current flows
-        // Use CC logic to increase RPM
-        new_frequency = rs485_CalcFrequencyFor_CC(
-            current_frequency, 
-            target_current_0_01A, 
-            actual_current_0_01A
-        );
+        // Use CC logic to maintain current at PRECHARGE_AMPS (2A) - like CC but fixed at precharge level
+        uint16_t precharge_target_0_01A = (uint16_t)(PRECHARGE_AMPS * 100);  // Convert 2A to 0.01A units
+        new_frequency = rs485_CalcFrequencyFor_CC(current_frequency, precharge_target_0_01A, actual_current_0_01A);
         
         // Debug logging
         #if ACTUAL_TARGET_CC_CV_debug
-        int32_t current_error = (int32_t)actual_current_0_01A - (int32_t)target_current_0_01A;
-        Serial.printf("[CHARGING_START] Target: %.2fA, Actual: %.2fA, Error: %d (0.01A), Freq: %d -> %d (%.2f Hz -> %.2f Hz)\n",
-            target_current, safe_actual_current, current_error,
+        int32_t current_error = (int32_t)actual_current_0_01A - (int32_t)precharge_target_0_01A;
+        Serial.printf("[CHARGING_START] Target: %.2fA (Precharge), Actual: %.2fA, Error: %d (0.01A), Freq: %d -> %d (%.2f Hz -> %.2f Hz)\n",
+            PRECHARGE_AMPS, safe_actual_current, current_error,
             current_frequency, new_frequency,
             current_frequency / 100.0f, new_frequency / 100.0f);
         #endif
@@ -523,29 +516,70 @@ void update_charging_control() {
         rs485_sendFrequencyCommand(new_frequency);
         current_frequency = new_frequency;
         
-        // Check if current >= 1A, then transition to CC state
-        if (safe_actual_current >= 1.0f) {
-            Serial.println("[CHARGING] Current reached 1A, transitioning to CC mode");
-            current_app_state = STATE_CHARGING_CC;
-            cc_state_start_time = millis();  // Record CC state start time
-            Serial.println("[CHARGING] CC state timing started");
+        // Check if voltage reached target voltage before 3 minutes - override and go to complete
+        if (safe_actual_voltage >= target_voltage) {
+            Serial.println("[CHARGING] Voltage limit reached during precharge, transitioning to complete");
             
-            // Initialize voltage saturation tracking on CC entry
-            base_volt_satu_ref = safe_actual_voltage;  // Record base voltage reference
-            present_volt_satu_check = 0.0f;  // Reset present voltage check
-            last_voltage_saturation_check_time = millis();  // Initialize check time
-            Serial.printf("[VOLT_SAT] CC entry: base_volt_satu_ref = %.2fV\n", base_volt_satu_ref);
+            // STEP 1: Send 0 RPM command IMMEDIATELY when condition is met
+            Serial.println("[CHARGING] Sending 0 RPM command immediately...");
+            rs485_sendFrequencyCommand(0);  // Send 0 Hz
+            current_frequency = 0;
+            delay(10);  // Give RS485 time to send the command
             
-            // Screen switch will happen in determine_screen_from_state()
+            // STEP 2: Calculate final charging time
+            unsigned long current_time = millis();
+            if (charging_start_time > 0) {
+                final_charging_time_ms = current_time - charging_start_time;
+                charging_complete = true;
+                Serial.printf("[CHARGING] Final charging time: %lu ms (%.2f minutes)\n", 
+                             final_charging_time_ms, final_charging_time_ms / 60000.0f);
+            }
+            
+            // Open contactor via CAN bus
+            Serial.println("[CONTACTOR] Opening contactor on voltage limit reached during precharge...");
+            send_contactor_control(CONTACTOR_OPEN);
+            
+            // Set stop reason to voltage limit reached during precharge
+            charge_stop_reason = CHARGE_STOP_VOLTAGE_LIMIT_PRECHARGE;
+            
+            // Transition to complete state
+            current_app_state = STATE_CHARGING_COMPLETE;
+            Serial.println("[CHARGING] Transitioned to charging complete state (voltage limit during precharge)");
+            
+            // Set flag to send stop command after screen 6 loads
+            pending_stop_command = true;
+            
+            // STEP 3: Move to screen 6
+            switch_to_screen(SCREEN_CHARGING_COMPLETE);
+        }
+        // Check if precharge time elapsed (3 minutes), then transition to CC state
+        else {
+            unsigned long current_time = millis();
+            unsigned long precharge_elapsed = 0;
+            if (charging_start_time > 0) {
+                precharge_elapsed = current_time - charging_start_time;
+            }
+            
+            if (precharge_elapsed >= PRECHARGE_TIME_MS) {
+                Serial.println("[CHARGING] Precharge complete (3 min elapsed), transitioning to CC mode");
+                current_app_state = STATE_CHARGING_CC; //update the fsm state to charging cc
+                cc_state_start_time = millis();  // Record CC state start time
+                Serial.println("[CHARGING] CC state timing started");
+                
+                // Initialize voltage saturation tracking on CC entry
+                base_volt_satu_ref = safe_actual_voltage;  // Record base voltage reference
+                present_volt_satu_check = 0.0f;  // Reset present voltage check
+                last_voltage_saturation_check_time = millis();  // Initialize check time
+                Serial.printf("[VOLT_SAT] CC entry: base_volt_satu_ref = %.2fV\n", base_volt_satu_ref);
+                
+                // Screen switch will happen in determine_screen_from_state()
+            }
         }
     }
+
+    // [2] STATE_CHARGING_CC: Constant Current mode until target voltage reached
     else if (current_app_state == STATE_CHARGING_CC) {
-        // STATE_CHARGING_CC: Constant Current mode until target voltage reached
-        new_frequency = rs485_CalcFrequencyFor_CC(
-            current_frequency, 
-            target_current_0_01A, 
-            actual_current_0_01A
-        );
+        new_frequency = rs485_CalcFrequencyFor_CC(current_frequency, target_current_0_01A, actual_current_0_01A); 
         
         // Debug logging
         #if ACTUAL_TARGET_CC_CV_debug
@@ -648,13 +682,10 @@ void update_charging_control() {
             // Screen switch will happen in determine_screen_from_state()
         }
     }
+
+    // [3] STATE_CHARGING_CV: Constant Voltage mode
     else if (current_app_state == STATE_CHARGING_CV) {
-        // STATE_CHARGING_CV: Constant Voltage mode
-        new_frequency = rs485_CalcFrequencyFor_CV(
-            current_frequency, 
-            target_voltage_0_01V, 
-            actual_voltage_0_01V
-        );
+        new_frequency = rs485_CalcFrequencyFor_CV(current_frequency, target_voltage_0_01V, actual_voltage_0_01V);
         
         // Debug logging
         #if ACTUAL_TARGET_CC_CV_debug
@@ -740,16 +771,13 @@ void update_charging_control() {
             switch_to_screen(SCREEN_CHARGING_COMPLETE);
         }
     }
+        
+    // [4] STATE_CHARGING_VOLTAGE_SATURATION: Constant Voltage mode using saturation voltage as target
     else if (current_app_state == STATE_CHARGING_VOLTAGE_SATURATION) {
-        // STATE_CHARGING_VOLTAGE_SATURATION: Constant Voltage mode using saturation voltage as target
         // Use the recorded saturation voltage as target instead of battery profile cutoff voltage
         uint16_t saturation_voltage_0_01V = (uint16_t)(voltage_saturation_detected_voltage * 100);
         
-        new_frequency = rs485_CalcFrequencyFor_CV(
-            current_frequency, 
-            saturation_voltage_0_01V, 
-            actual_voltage_0_01V
-        );
+        new_frequency = rs485_CalcFrequencyFor_CV(current_frequency, saturation_voltage_0_01V, actual_voltage_0_01V);
         
         // Debug logging
         #if ACTUAL_TARGET_CC_CV_debug
@@ -931,7 +959,10 @@ void update_current_screen() {
     
     // Update screen 6 status label based on charge stop reason
     if (screen6_status_label != nullptr && current_screen_id == SCREEN_CHARGING_COMPLETE) {
-        if (charge_stop_reason == CHARGE_STOP_VOLTAGE_SATURATION) {
+        if (charge_stop_reason == CHARGE_STOP_VOLTAGE_LIMIT_PRECHARGE) {
+            lv_label_set_text(screen6_status_label, "Voltage limit reached during precharge");
+            lv_obj_set_style_text_color(screen6_status_label, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green (info, not error)
+        } else if (charge_stop_reason == CHARGE_STOP_VOLTAGE_SATURATION) {
             lv_label_set_text(screen6_status_label, "Charge stopped due to voltage saturate!");
             lv_obj_set_style_text_color(screen6_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
         } else if (charge_stop_reason == CHARGE_STOP_COMPLETE) {
@@ -1822,7 +1853,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v2.6");
+    lv_label_set_text(title, "GCU 3kW Charger v2.9");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -1971,7 +2002,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v2.6");
+    lv_label_set_text(title, "GCU 3kW Charger v2.9");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);

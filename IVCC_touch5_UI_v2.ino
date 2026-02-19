@@ -68,15 +68,15 @@ void setup()
     delay(100); // Small delay for serial stabilization
 
     // Initialize WiFi preferences
-    init_wifi_preferences();
+    // init_wifi_preferences();
     
     // Auto-connect to WiFi if credentials exist in preferences
-    if (has_wifi_credentials()) {
-        Serial.println("[SETUP] WiFi credentials found in preferences, attempting connection...");
-        connect_to_wifi();
-    } else {
-        Serial.println("[SETUP] No WiFi credentials in preferences, skipping auto-connect");
-    }
+    // if (has_wifi_credentials()) {
+    //     Serial.println("[SETUP] WiFi credentials found in preferences, attempting connection...");
+    //     connect_to_wifi();
+    // } else {
+    //     Serial.println("[SETUP] No WiFi credentials in preferences, skipping auto-connect");
+    // }
 
     Serial.println("Initializing board, code is on github, changed again 2");
     board = new Board();
@@ -140,21 +140,22 @@ void setup()
     initializeBatteryProfiles();
 
     // Initialize BLE after battery profiles
-    Serial.println("Initializing BLE...");
-    bleManager.init();
-    Serial.println("BLE initialized successfully");
+    // Serial.println("Initializing BLE...");
+    // bleManager.init();
+    // Serial.println("BLE initialized successfully");
 
-    Serial.println("End of setup, setup success! ------ v2.6------  \n -----");
+    //give 200ms delay and send a contactor open cmd over can bus.
+    delay(200);
+    send_contactor_control(CONTACTOR_OPEN);
+    
+    Serial.println("End of setup, setup success! ------ v2.9------  \n -----");
 }
 
 void loop()
 {
     //Serial.println("IDLE loop");
     //check serial rx buffer. (for input cmds. ) and print .
-    process_serial_cmd();
-
-    // Process BLE events (non-blocking)
-    bleManager.process();
+    //process_serial_cmd(); //remove in production
 
     // Periodic screen state check (non-blocking)
     update_screen_based_on_state();
@@ -168,13 +169,16 @@ void loop()
         last_table_update = millis();
     }
 
+    // Process BLE events (non-blocking)
+    // bleManager.process();
+
     // Process reboot countdown if active
-    process_reboot_countdown();
+    // process_reboot_countdown();
 
     // Handle OTA server requests if active
-    handle_ota_requests();
+    // handle_ota_requests();
 
-    delay(200);
+    delay(100); // 10Hz loop frequency (100ms = 10 times per second)
 }
 
 // Process serial commands - mainly for voltage input

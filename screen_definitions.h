@@ -13,6 +13,10 @@
 #define VOLTAGE_SATURATION_CV_DURATION_MS (5 * 60 * 1000)     // xx2: 5 minutes in milliseconds
 #define VOLTAGE_SATURATION_THRESHOLD_V 0.5f                   // 0.5V threshold for saturation detection
 
+// Precharge timing macros (Screen 3 - Charging Start)
+#define PRECHARGE_TIME_MS (3 * 60 * 1000)  // 3 minutes in milliseconds
+#define PRECHARGE_AMPS 2.0f                // 2.0 Amps threshold
+
 // Global screen objects
 extern lv_obj_t* screen_1;
 extern lv_obj_t* screen_2;
@@ -36,7 +40,7 @@ typedef enum {
     SCREEN_CHARGING_COMPLETE,  // Screen 6 - Charging complete
     SCREEN_EMERGENCY_STOP,     // Screen 7 - Emergency stop
     SCREEN_VOLTAGE_SATURATION, // Screen 8 - Voltage saturation detected
-    SCREEN_CAN_DEBUG,          // Screen 13 - CAN debug screen
+    SCREEN_CAN_DEBUG = 13,     // Screen 13 - CAN debug screen
     SCREEN_TIME_DEBUG = 16,    // Screen 16 - Time debug screen
     SCREEN_BLE_DEBUG = 17      // Screen 17 - BLE debug screen
 } screen_id_t;
@@ -58,6 +62,7 @@ typedef enum {
     CHARGE_STOP_COMPLETE = 1,          // Charging complete (normal termination)
     CHARGE_STOP_EMERGENCY = 2,         // Emergency stop (user initiated)
     CHARGE_STOP_VOLTAGE_SATURATION = 3, // Charge stopped due to voltage saturation
+    CHARGE_STOP_VOLTAGE_LIMIT_PRECHARGE = 4, // Voltage limit reached during precharge
     // Future reasons can be added here
 } charge_stop_reason_t;
 
