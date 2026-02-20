@@ -14,8 +14,11 @@
 #define VOLTAGE_SATURATION_THRESHOLD_V 0.5f                   // 0.5V threshold for saturation detection
 
 // Precharge timing macros (Screen 3 - Charging Start)
-#define PRECHARGE_TIME_MS (3 * 60 * 1000)  // 3 minutes in milliseconds
+#define PRECHARGE_TIME_MS (2 * 60 * 1000)  // 3 minutes in milliseconds
 #define PRECHARGE_AMPS 2.0f                // 2.0 Amps threshold
+
+// Temperature threshold macro
+#define MAX_TEMP_THRESHOLD 80.0f           // 80.0 degrees Celsius
 
 // Global screen objects
 extern lv_obj_t* screen_1;
@@ -63,6 +66,7 @@ typedef enum {
     CHARGE_STOP_EMERGENCY = 2,         // Emergency stop (user initiated)
     CHARGE_STOP_VOLTAGE_SATURATION = 3, // Charge stopped due to voltage saturation
     CHARGE_STOP_VOLTAGE_LIMIT_PRECHARGE = 4, // Voltage limit reached during precharge
+    CHARGE_STOP_HIGH_TEMP = 5,         // Emergency stop due to high temperature
     // Future reasons can be added here
 } charge_stop_reason_t;
 

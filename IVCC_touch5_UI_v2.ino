@@ -43,8 +43,6 @@ struct time_from_m2 {
 } m2Time;
 
 // Global instances definitions
-ScreenLogger screenLogger;
-sd_logging sdLogger;
 BLEManager bleManager;
 
 using namespace esp_panel::drivers;
@@ -148,7 +146,7 @@ void setup()
     delay(200);
     send_contactor_control(CONTACTOR_OPEN);
     
-    Serial.println("End of setup, setup success! ------ v2.9------  \n -----");
+    Serial.println("End of setup, setup success! ------ v3.2------  \n -----");
 }
 
 void loop()
@@ -260,8 +258,14 @@ void initializeSDCard() {
     uint64_t cardSize = SD.cardSize() / (1024 * 1024);
     Serial.printf("SD Card Size: %lluMB\n", cardSize); // SD card size
 
-    // Initialize SD logging
-    if (!sdLogger.initialize()) {
-        Serial.println("SD logging initialization failed");
+    // Initialize charge logging first
+    if (initChargeLogging()) {
+        // Only set flag to true if charge logging initialization succeeds
+        sd_logging_initialized = true;
+        Serial.println("SD card initialized successfully, logging enabled");
+    } else {
+        // Set flag to false if charge logging initialization fails
+        sd_logging_initialized = false;
+        Serial.println("Charge logging initialization failed, logging disabled");
     }
 }

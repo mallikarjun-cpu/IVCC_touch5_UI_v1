@@ -15,6 +15,9 @@ extern struct sensor_data {
     float volt;
     float curr;
     int32_t temp1;
+    int32_t temp2;
+    int32_t temp3;
+    int32_t temp4;
 } sensorData;
 
 // External time data from M2
@@ -77,6 +80,9 @@ static BatteryType* selected_battery_profile = nullptr;
 static lv_obj_t* screen3_battery_details_label = nullptr;
 static lv_obj_t* screen4_battery_details_label = nullptr;
 static lv_obj_t* screen5_battery_details_label = nullptr;
+static lv_obj_t* screen3_temp_label = nullptr;
+static lv_obj_t* screen4_temp_label = nullptr;
+static lv_obj_t* screen5_temp_label = nullptr;
 static lv_obj_t* screen8_battery_details_label = nullptr;
 
 // Timer variables for charging screens
@@ -91,6 +97,11 @@ static bool pending_stop_command = false;  // Flag to send stop command after sc
 // Ah calculation variables
 static float accumulated_ah = 0.0f;  // Accumulated Ah (default 0.0)
 static unsigned long last_ah_update_time = 0;  // Last time Ah was updated (for rate limiting)
+
+// Max value tracking during charge
+static float max_current_during_charge = 0.0f;
+static float max_voltage_during_charge = 0.0f;
+static uint32_t current_charge_serial = 0;  // Serial number for current charge cycle
 
 // Timer table objects for screens 3, 4, 5, 6, 7, 8
 static lv_obj_t* screen3_timer_table = nullptr;
@@ -118,6 +129,7 @@ static lv_obj_t* screen2_confirmed_battery_label = nullptr;
 static lv_obj_t* screen6_status_label = nullptr;  // Status label for screen 6 (dynamic based on stop reason)
 static lv_obj_t* screen6_remove_battery_popup = nullptr;
 static lv_obj_t* screen6_remove_battery_label = nullptr;
+static lv_obj_t* screen7_status_label = nullptr;  // Status label for screen 7 (dynamic based on stop reason)
 static lv_obj_t* screen7_remove_battery_popup = nullptr;
 static lv_obj_t* screen7_remove_battery_label = nullptr;
 
@@ -446,6 +458,44 @@ void switch_to_screen(screen_id_t screen_id) {
 
         // Update M2 state box for current screen
         update_m2_state_display();
+        
+        // Set battery details label once on entry to screens 3, 4, 5 (won't change during charge)
+        if (screen_id == SCREEN_CHARGING_STARTED && screen3_battery_details_label != nullptr) {
+            if (selected_battery_profile != nullptr) {
+                char details_text[100];
+                sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getDisplayName().c_str(),
+                        selected_battery_profile->getCutoffVoltage(),
+                        selected_battery_profile->getConstCurrent());
+                lv_label_set_text(screen3_battery_details_label, details_text);
+            } else {
+                lv_label_set_text(screen3_battery_details_label, "Selected Battery: None");
+            }
+        }
+        if (screen_id == SCREEN_CHARGING_CC && screen4_battery_details_label != nullptr) {
+            if (selected_battery_profile != nullptr) {
+                char details_text[100];
+                sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getDisplayName().c_str(),
+                        selected_battery_profile->getCutoffVoltage(),
+                        selected_battery_profile->getConstCurrent());
+                lv_label_set_text(screen4_battery_details_label, details_text);
+            } else {
+                lv_label_set_text(screen4_battery_details_label, "Selected Battery: None");
+            }
+        }
+        if (screen_id == SCREEN_CHARGING_CV && screen5_battery_details_label != nullptr) {
+            if (selected_battery_profile != nullptr) {
+                char details_text[100];
+                sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getDisplayName().c_str(),
+                        selected_battery_profile->getCutoffVoltage(),
+                        selected_battery_profile->getConstCurrent());
+                lv_label_set_text(screen5_battery_details_label, details_text);
+            } else {
+                lv_label_set_text(screen5_battery_details_label, "Selected Battery: None");
+            }
+        }
 
         // Load the screen
         lv_scr_load(target_screen);
@@ -478,6 +528,66 @@ void update_charging_control() {
         return;
     }
     last_control_update = millis();
+    
+    // Temperature check: Monitor temp1 and temp2 during charging states
+    // Convert from 0.01°C units to Celsius
+    float temp1_celsius = sensorData.temp1 / 100.0f;
+    float temp2_celsius = sensorData.temp2 / 100.0f;
+    
+    // Check if either temperature exceeds threshold
+    if (temp1_celsius > MAX_TEMP_THRESHOLD || temp2_celsius > MAX_TEMP_THRESHOLD) {
+        Serial.printf("[TEMP] High temperature detected! Temp1=%.2f°C, Temp2=%.2f°C, Threshold=%.1f°C\n",
+                     temp1_celsius, temp2_celsius, MAX_TEMP_THRESHOLD);
+        Serial.println("[TEMP] Triggering emergency stop due to high temperature");
+        
+        // STEP 1: Send 0 RPM command IMMEDIATELY
+        Serial.println("[TEMP] Sending 0 RPM command immediately...");
+        rs485_sendFrequencyCommand(0);  // Send 0 Hz
+        current_frequency = 0;
+        delay(10);  // Give RS485 time to send the command
+        
+        // STEP 2: Open contactor via CAN bus IMMEDIATELY
+        Serial.println("[TEMP] Opening contactor immediately on high temperature...");
+        send_contactor_control(CONTACTOR_OPEN);
+        
+        // STEP 3: Store final charging time before transitioning (if charging was in progress)
+        if (charging_start_time > 0 && !charging_complete) {
+            final_charging_time_ms = millis() - charging_start_time;
+            charging_complete = true;
+            Serial.printf("[TEMP] Final charging time: %lu ms (%.2f minutes)\n", 
+                         final_charging_time_ms, final_charging_time_ms / 60000.0f);
+            
+            // Calculate and store final remaining time (if in CV state)
+            if (cv_start_time > 0 && cc_state_duration_for_timer > 0) {
+                unsigned long cv_elapsed = millis() - cv_start_time;
+                unsigned long cv_33_percent_time = cc_state_duration_for_timer / 3;  // 33% of CC time
+                unsigned long cv_30_min = 30 * 60 * 1000;  // 30 minutes in ms
+                unsigned long target_cv_time = (cv_33_percent_time < cv_30_min) ? cv_33_percent_time : cv_30_min;
+                final_remaining_time_ms = (target_cv_time > cv_elapsed) ? (target_cv_time - cv_elapsed) : 0;
+                Serial.printf("[TEMP] Final remaining time: %lu ms (%.2f minutes)\n", 
+                             final_remaining_time_ms, final_remaining_time_ms / 60000.0f);
+            }
+        }
+        
+        // STEP 4: Set stop reason to high temperature
+        charge_stop_reason = CHARGE_STOP_HIGH_TEMP;
+        
+        // Log charge complete
+        if (sd_logging_initialized) {
+            logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
+                             final_charging_time_ms, accumulated_ah, charge_stop_reason);
+        }
+        
+        // STEP 5: Set flag to send stop command after screen 7 loads
+        pending_stop_command = true;
+        
+        // STEP 6: Switch to emergency stop state and screen
+        current_app_state = STATE_EMERGENCY_STOP;
+        switch_to_screen(SCREEN_EMERGENCY_STOP);
+        
+        // Exit early - don't continue with normal charging control
+        return;
+    }
     
     // Get target values from battery profile
     float target_current = selected_battery_profile->getConstCurrent(); // Amps
@@ -541,6 +651,12 @@ void update_charging_control() {
             
             // Set stop reason to voltage limit reached during precharge
             charge_stop_reason = CHARGE_STOP_VOLTAGE_LIMIT_PRECHARGE;
+            
+            // Log charge complete
+            if (sd_logging_initialized) {
+                logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
+                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+            }
             
             // Transition to complete state
             current_app_state = STATE_CHARGING_COMPLETE;
@@ -762,6 +878,13 @@ void update_charging_control() {
             
             // Set stop reason and transition to complete state
             charge_stop_reason = CHARGE_STOP_COMPLETE;
+            
+            // Log charge complete
+            if (sd_logging_initialized) {
+                logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
+                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+            }
+            
             current_app_state = STATE_CHARGING_COMPLETE;
             
             // Set flag to send stop command after screen 6 loads
@@ -825,6 +948,12 @@ void update_charging_control() {
             
             // Set stop reason to voltage saturation
             charge_stop_reason = CHARGE_STOP_VOLTAGE_SATURATION;
+            
+            // Log charge complete
+            if (sd_logging_initialized) {
+                logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
+                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+            }
             
             // Transition to complete state
             current_app_state = STATE_CHARGING_COMPLETE;
@@ -906,18 +1035,13 @@ void update_current_screen() {
         }
     }
     
-    // Update battery details on screens 3, 4, 5, 8
-    if (screen3_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
-        if (selected_battery_profile != nullptr) {
-            char details_text[100];
-            sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)",
-                    selected_battery_profile->getDisplayName().c_str(),
-                    selected_battery_profile->getCutoffVoltage(),
-                    selected_battery_profile->getConstCurrent());
-            lv_label_set_text(screen3_battery_details_label, details_text);
-        } else {
-            lv_label_set_text(screen3_battery_details_label, "Selected Battery: None");
-        }
+    // Update temperature label on screen 3
+    if (screen3_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
+        float temp1_celsius = sensorData.temp1 / 100.0f;
+        float temp2_celsius = sensorData.temp2 / 100.0f;
+        char temp_text[80];
+        sprintf(temp_text, "motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
+        lv_label_set_text(screen3_temp_label, temp_text);
     }
     if (screen4_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
         if (selected_battery_profile != nullptr) {
@@ -931,17 +1055,21 @@ void update_current_screen() {
             lv_label_set_text(screen4_battery_details_label, "Selected Battery: None");
         }
     }
-    if (screen5_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_CV) {
-        if (selected_battery_profile != nullptr) {
-            char details_text[100];
-            sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)",
-                    selected_battery_profile->getDisplayName().c_str(),
-                    selected_battery_profile->getCutoffVoltage(),
-                    selected_battery_profile->getConstCurrent());
-            lv_label_set_text(screen5_battery_details_label, details_text);
-        } else {
-            lv_label_set_text(screen5_battery_details_label, "Selected Battery: None");
-        }
+    // Update temperature label on screen 4
+    if (screen4_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
+        float temp1_celsius = sensorData.temp1 / 100.0f;
+        float temp2_celsius = sensorData.temp2 / 100.0f;
+        char temp_text[80];
+        sprintf(temp_text, "motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
+        lv_label_set_text(screen4_temp_label, temp_text);
+    }
+    // Update temperature label on screen 5
+    if (screen5_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_CV) {
+        float temp1_celsius = sensorData.temp1 / 100.0f;
+        float temp2_celsius = sensorData.temp2 / 100.0f;
+        char temp_text[80];
+        sprintf(temp_text, "motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
+        lv_label_set_text(screen5_temp_label, temp_text);
     }
     if (screen8_battery_details_label != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
         if (selected_battery_profile != nullptr) {
@@ -976,6 +1104,21 @@ void update_current_screen() {
             // Default message
             lv_label_set_text(screen6_status_label, "Battery charging completed successfully");
             lv_obj_set_style_text_color(screen6_status_label, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
+        }
+    }
+    
+    // Update screen 7 status label based on charge stop reason
+    if (screen7_status_label != nullptr && current_screen_id == SCREEN_EMERGENCY_STOP) {
+        if (charge_stop_reason == CHARGE_STOP_HIGH_TEMP) {
+            lv_label_set_text(screen7_status_label, "High temp detected");
+            lv_obj_set_style_text_color(screen7_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
+        } else if (charge_stop_reason == CHARGE_STOP_EMERGENCY) {
+            lv_label_set_text(screen7_status_label, "Charging stopped by user");
+            lv_obj_set_style_text_color(screen7_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
+        } else {
+            // Default message
+            lv_label_set_text(screen7_status_label, "Charging stopped by user");
+            lv_obj_set_style_text_color(screen7_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
         }
     }
     
@@ -1229,6 +1372,16 @@ void update_table_values() {
     // Lock LVGL before updating UI
     lvgl_port_lock(-1);
 
+    // Update max values during charge (non-blocking)
+    if (charging_start_time > 0 && !charging_complete) {
+        if (sensorData.curr > max_current_during_charge) {
+            max_current_during_charge = sensorData.curr;
+        }
+        if (sensorData.volt > max_voltage_during_charge) {
+            max_voltage_during_charge = sensorData.volt;
+        }
+    }
+
     if (data_table != nullptr) {
         // Update voltage (column 0)
         lv_table_set_cell_value(data_table, 1, 0,
@@ -1238,10 +1391,10 @@ void update_table_values() {
         lv_table_set_cell_value(data_table, 1, 1,
             String(sensorData.curr, 2).c_str());
 
-        // Update temperature (column 2) - temp1 from CAN data (0.01°C resolution)
-        float temp1_celsius = sensorData.temp1 / 100.0f;
+        // Update temperature (column 2) - temp3 from CAN data (room temp, 0.01°C resolution)
+        float temp3_celsius = sensorData.temp3 / 100.0f;
         lv_table_set_cell_value(data_table, 1, 2,
-            String(temp1_celsius, 1).c_str());
+            String(temp3_celsius, 1).c_str());
 
         // Update frequency (column 3) - show current RPM
         float freq_hz = current_frequency / 100.0f;
@@ -1700,6 +1853,16 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         // Reset Ah calculation
         accumulated_ah = 0.0f;
         last_ah_update_time = millis();
+        
+        // Reset max tracking variables
+        max_current_during_charge = 0.0f;
+        max_voltage_during_charge = 0.0f;
+        
+        // Log charge start
+        if (sd_logging_initialized && selected_battery_profile != nullptr) {
+            current_charge_serial = getNextSerialNumber();
+            logChargeStart(current_charge_serial, selected_battery_profile);
+        }
 
         // Switch to charging start state
         current_app_state = STATE_CHARGING_START;
@@ -1773,6 +1936,12 @@ void emergency_stop_event_handler(lv_event_t * e) {
         
         // Set stop reason
         charge_stop_reason = CHARGE_STOP_EMERGENCY;
+        
+        // Log charge complete
+        if (sd_logging_initialized) {
+            logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
+                             final_charging_time_ms, accumulated_ah, charge_stop_reason);
+        }
         
         // Set flag to send stop command after screen 7 loads
         pending_stop_command = true;
@@ -1853,7 +2022,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v2.9");
+    lv_label_set_text(title, "GCU 3kW Charger v3.2");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -1877,14 +2046,14 @@ void create_screen_1()
         // Set column widths
         lv_table_set_col_width(data_table, 0, 198);  // Volt
         lv_table_set_col_width(data_table, 1, 198);  // Curr
-        lv_table_set_col_width(data_table, 2, 198);  // Temp1
+        lv_table_set_col_width(data_table, 2, 198);  // Temp3
         lv_table_set_col_width(data_table, 3, 198);  // Rpm
         lv_table_set_col_width(data_table, 4, 198);  // Entry
 
         // Headers (Row 0)
         lv_table_set_cell_value(data_table, 0, 0, "Volt");
         lv_table_set_cell_value(data_table, 0, 1, "Curr");
-        lv_table_set_cell_value(data_table, 0, 2, "Temp1");
+        lv_table_set_cell_value(data_table, 0, 2, "R Temp3");
         lv_table_set_cell_value(data_table, 0, 3, "Rpm");
         lv_table_set_cell_value(data_table, 0, 4, "Entry");
 
@@ -2002,7 +2171,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v2.9");
+    lv_label_set_text(title, "GCU 3kW Charger v3.2");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2192,6 +2361,13 @@ void create_screen_3(void) {
     lv_obj_set_style_text_font(screen3_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_align(screen3_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
     
+    // Temperature label (below battery details label)
+    screen3_temp_label = lv_label_create(screen_3);
+    lv_label_set_text(screen3_temp_label, "motor temp : -- , Gcu temp : --");
+    lv_obj_set_style_text_color(screen3_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen3_temp_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_align(screen3_temp_label, LV_ALIGN_TOP_LEFT, 12, 300);  // Below battery details label
+    
     // Timer table (3x2) for screen 3 - below battery label, left aligned
     screen3_timer_table = lv_table_create(screen_3);
     lv_table_set_col_cnt(screen3_timer_table, 3);
@@ -2270,6 +2446,13 @@ void create_screen_4(void) {
     lv_obj_set_style_text_font(screen4_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_align(screen4_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
     
+    // Temperature label (below battery details label)
+    screen4_temp_label = lv_label_create(screen_4);
+    lv_label_set_text(screen4_temp_label, "motor temp : -- , Gcu temp : --");
+    lv_obj_set_style_text_color(screen4_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen4_temp_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_align(screen4_temp_label, LV_ALIGN_TOP_LEFT, 12, 300);  // Below battery details label
+    
     // Timer table (3x2) for screen 4 - below battery label, left aligned
     screen4_timer_table = lv_table_create(screen_4);
     lv_table_set_col_cnt(screen4_timer_table, 3);
@@ -2346,6 +2529,13 @@ void create_screen_5(void) {
     lv_obj_set_style_text_color(screen5_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen5_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_align(screen5_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
+    
+    // Temperature label (below battery details label)
+    screen5_temp_label = lv_label_create(screen_5);
+    lv_label_set_text(screen5_temp_label, "motor temp : -- , Gcu temp : --");
+    lv_obj_set_style_text_color(screen5_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen5_temp_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_align(screen5_temp_label, LV_ALIGN_TOP_LEFT, 12, 300);  // Below battery details label
     
     // Timer table (3x2) for screen 5 - shows total time, remaining time, and Ah, below battery label, left aligned
     screen5_timer_table = lv_table_create(screen_5);
@@ -2491,12 +2681,12 @@ void create_screen_7(void) {
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
 
-    // Status label
-    lv_obj_t *status_label_7 = lv_label_create(screen_7);
-    lv_label_set_text(status_label_7, "Charging stopped by user");
-    lv_obj_set_style_text_color(status_label_7, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
-    lv_obj_set_style_text_font(status_label_7, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_align(status_label_7, LV_ALIGN_TOP_MID, 0, 60);
+    // Status label (will be updated dynamically based on stop reason)
+    screen7_status_label = lv_label_create(screen_7);
+    lv_label_set_text(screen7_status_label, "Charging stopped by user");
+    lv_obj_set_style_text_color(screen7_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
+    lv_obj_set_style_text_font(screen7_status_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(screen7_status_label, LV_ALIGN_TOP_MID, 0, 60);
 
     // Move shared data table to screen_7
     if (data_table != nullptr) {
