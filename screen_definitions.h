@@ -15,10 +15,13 @@
 
 // Precharge timing macros (Screen 3 - Charging Start)
 #define PRECHARGE_TIME_MS (2 * 60 * 1000)  // 3 minutes in milliseconds
-#define PRECHARGE_AMPS 2.0f                // 2.0 Amps threshold
+#define PRECHARGE_AMPS 10.0f                // 2.0 Amps threshold
 
 // Temperature threshold macro
 #define MAX_TEMP_THRESHOLD 80.0f           // 80.0 degrees Celsius
+
+// CAN/RTC Debug screens macro (0 = hidden for production, 1 = visible for debugging)
+#define CAN_RTC_DEBUG 0  // can, rtc screens hidden for production
 
 // Global screen objects
 extern lv_obj_t* screen_1;
@@ -67,6 +70,7 @@ typedef enum {
     CHARGE_STOP_VOLTAGE_SATURATION = 3, // Charge stopped due to voltage saturation
     CHARGE_STOP_VOLTAGE_LIMIT_PRECHARGE = 4, // Voltage limit reached during precharge
     CHARGE_STOP_HIGH_TEMP = 5,         // Emergency stop due to high temperature
+    CHARGE_STOP_110_PERCENT_CAPACITY = 6, // Charge stopped: 110% capacity reached, Ah limit
     // Future reasons can be added here
 } charge_stop_reason_t;
 
@@ -94,7 +98,7 @@ void create_screen_7(void); //screen 7 - Emergency stop
 void create_screen_8(void); //screen 8 - Voltage saturation detected
 void create_screen_13(void); //screen 13 - CAN debug screen
 void create_screen_16(void); //screen 16 - Time debug screen
-void create_screen_17(void); //screen 17 - BLE debug screen
+// void create_screen_17(void); //screen 17 - BLE debug screen - commented out, not required
 
 // Screen management functions
 void initialize_all_screens(void);

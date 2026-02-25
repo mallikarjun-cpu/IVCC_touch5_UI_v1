@@ -167,14 +167,14 @@ void initializeBatteryProfiles();
 typedef enum {
     M2_STATE_STANDBY = 0,      // Default standby state
     M2_STATE_INIT,             // Initializing
-    M2_STATE_READY,            // Ready for operation
-    M2_STATE_CHARGING,         // Charging active
-    M2_STATE_FULL,             // Battery full
-    M2_STATE_ERROR,            // Error state
+    // M2_STATE_READY,            // Ready for operation - commented out, not required
+    // M2_STATE_CHARGING,         // Charging active - commented out, not required
+    // M2_STATE_FULL,             // Battery full - commented out, not required
+    // M2_STATE_ERROR,            // Error state - commented out, not required
     M2_STATE_DISCONNECTED,     // Disconnected
-    M2_STATE_FAULT,            // Fault detected
-    M2_STATE_CALIBRATING,      // Calibrating
-    M2_STATE_MAINTENANCE       // Maintenance mode
+    // M2_STATE_FAULT,            // Fault detected - commented out, not required
+    // M2_STATE_CALIBRATING,      // Calibrating - commented out, not required
+    // M2_STATE_MAINTENANCE       // Maintenance mode - commented out, not required
 } m2_state_t;
 
 // M2 State Configuration Struct

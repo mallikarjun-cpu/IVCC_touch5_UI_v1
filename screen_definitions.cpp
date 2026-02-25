@@ -97,11 +97,15 @@ static bool pending_stop_command = false;  // Flag to send stop command after sc
 // Ah calculation variables
 static float accumulated_ah = 0.0f;  // Accumulated Ah (default 0.0)
 static unsigned long last_ah_update_time = 0;  // Last time Ah was updated (for rate limiting)
+static unsigned long last_rtc_update_time = 0;  // Last time RTC time was updated (for rate limiting, 2Hz = 500ms)
 
 // Max value tracking during charge
 static float max_current_during_charge = 0.0f;
 static float max_voltage_during_charge = 0.0f;
 static uint32_t current_charge_serial = 0;  // Serial number for current charge cycle
+
+// Log number for SD card display
+static int32_t log_num_sdhc = -1;  // Latest complete log number (default -1)
 
 // Timer table objects for screens 3, 4, 5, 6, 7, 8
 static lv_obj_t* screen3_timer_table = nullptr;
@@ -135,6 +139,7 @@ static lv_obj_t* screen7_remove_battery_label = nullptr;
 
 // screen 1 WiFi status display
 static lv_obj_t* screen1_wifi_status_label = nullptr;
+static lv_obj_t* screen1_rtc_time_label = nullptr;
 
 // screen 13 CAN frame display
 static lv_obj_t* screen13_can_frame_label = nullptr;
@@ -344,9 +349,11 @@ void initialize_all_screens() {
     create_screen_6();   // Charging complete screen
     create_screen_7();   // Emergency stop screen
     create_screen_8();   // Voltage saturation detected screen
+#if CAN_RTC_DEBUG
     create_screen_13();  // CAN debug screen
     create_screen_16();  // Time debug screen
-    create_screen_17();  // BLE debug screen
+#endif // CAN_RTC_DEBUG
+    // create_screen_17();  // BLE debug screen - commented out, not required
 
     // Start with home screen
     switch_to_screen(SCREEN_HOME);
@@ -384,15 +391,17 @@ void switch_to_screen(screen_id_t screen_id) {
         case SCREEN_VOLTAGE_SATURATION:
             target_screen = screen_8;
             break;
+#if CAN_RTC_DEBUG
         case SCREEN_CAN_DEBUG:
             target_screen = screen_13;
             break;
         case SCREEN_TIME_DEBUG:
             target_screen = screen_16;
             break;
-        case SCREEN_BLE_DEBUG:
-            target_screen = screen_17;
-            break;
+#endif // CAN_RTC_DEBUG
+        // case SCREEN_BLE_DEBUG:
+        //     target_screen = screen_17;
+        //     break;
         default:
             Serial.printf("[SCREEN] ERROR: Invalid screen ID %d\n", screen_id);
             return;
@@ -403,14 +412,15 @@ void switch_to_screen(screen_id_t screen_id) {
         current_screen_id = screen_id;
 
         // Move shared UI elements to the new screen (except screen 17)
-        if (data_table != nullptr && screen_id != SCREEN_BLE_DEBUG) {
+        if (data_table != nullptr /* && screen_id != SCREEN_BLE_DEBUG */) {
             lv_obj_set_parent(data_table, target_screen);
             lv_obj_set_pos(data_table, 12, 110);
             lv_obj_clear_flag(data_table, LV_OBJ_FLAG_HIDDEN); // Make sure table is visible
-        } else if (screen_id == SCREEN_BLE_DEBUG && data_table != nullptr) {
-            // Hide table on BLE debug screen
-            lv_obj_add_flag(data_table, LV_OBJ_FLAG_HIDDEN);
         }
+        // else if (screen_id == SCREEN_BLE_DEBUG && data_table != nullptr) {
+        //     // Hide table on BLE debug screen
+        //     lv_obj_add_flag(data_table, LV_OBJ_FLAG_HIDDEN);
+        // }
         
         // Send stop command after screen 6 or 7 loads (if pending)
         if (pending_stop_command && (screen_id == SCREEN_CHARGING_COMPLETE || screen_id == SCREEN_EMERGENCY_STOP)) {
@@ -545,7 +555,7 @@ void update_charging_control() {
         rs485_sendFrequencyCommand(0);  // Send 0 Hz
         current_frequency = 0;
         delay(10);  // Give RS485 time to send the command
-        
+       
         // STEP 2: Open contactor via CAN bus IMMEDIATELY
         Serial.println("[TEMP] Opening contactor immediately on high temperature...");
         send_contactor_control(CONTACTOR_OPEN);
@@ -709,6 +719,65 @@ void update_charging_control() {
         // Send frequency command
         rs485_sendFrequencyCommand(new_frequency);
         current_frequency = new_frequency;
+        
+        // Check if 110% capacity reached: Stop charging if accumulated_ah >= 110% of selected_battery_profile Ah
+        if (selected_battery_profile != nullptr) {
+            float battery_profile_ah = (float)selected_battery_profile->getRatedAh();
+            float capacity_threshold = battery_profile_ah * 1.1f;  // 110% of rated capacity
+            
+            if (accumulated_ah >= capacity_threshold) {
+                Serial.printf("[CHARGING_CC] 110%% capacity reached! Accumulated: %.2f Ah, Threshold: %.2f Ah (%.0f Ah * 1.1)\n",
+                             accumulated_ah, capacity_threshold, battery_profile_ah);
+                
+                // Send 0 RPM command immediately
+                Serial.println("[CHARGING_CC] Sending 0 RPM command immediately...");
+                rs485_sendFrequencyCommand(0);  // Send 0 Hz
+                current_frequency = 0;
+                delay(10);  // Give RS485 time to send the command
+                
+                // Open contactor via CAN bus IMMEDIATELY
+                Serial.println("[CONTACTOR] Opening contactor immediately on 110% capacity reached...");
+                send_contactor_control(CONTACTOR_OPEN);
+                
+                // Store final charging time before transitioning (if charging was in progress)
+                if (charging_start_time > 0 && !charging_complete) {
+                    final_charging_time_ms = millis() - charging_start_time;
+                    charging_complete = true;
+                    Serial.printf("[CHARGING_CC] Final charging time: %lu ms (%.2f minutes)\n", 
+                                 final_charging_time_ms, final_charging_time_ms / 60000.0f);
+                    
+                    // Calculate and store final remaining time (if in CV state)
+                    if (cv_start_time > 0 && cc_state_duration_for_timer > 0) {
+                        unsigned long cv_elapsed = millis() - cv_start_time;
+                        unsigned long cv_33_percent_time = cc_state_duration_for_timer / 3;  // 33% of CC time
+                        unsigned long cv_30_min = 30 * 60 * 1000;  // 30 minutes in ms
+                        unsigned long target_cv_time = (cv_33_percent_time < cv_30_min) ? cv_33_percent_time : cv_30_min;
+                        final_remaining_time_ms = (target_cv_time > cv_elapsed) ? (target_cv_time - cv_elapsed) : 0;
+                        Serial.printf("[CHARGING_CC] Final remaining time: %lu ms (%.2f minutes)\n", 
+                                     final_remaining_time_ms, final_remaining_time_ms / 60000.0f);
+                    }
+                }
+                
+                // Set stop reason to 110% capacity reached
+                charge_stop_reason = CHARGE_STOP_110_PERCENT_CAPACITY;
+                
+                // Log charge complete
+                if (sd_logging_initialized) {
+                    logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
+                                     final_charging_time_ms, accumulated_ah, charge_stop_reason);
+                }
+                
+                // Set flag to send stop command after screen 7 loads
+                pending_stop_command = true;
+                
+                // Switch to emergency stop state and screen
+                current_app_state = STATE_EMERGENCY_STOP;
+                switch_to_screen(SCREEN_EMERGENCY_STOP);
+                
+                // Exit early - don't continue with normal charging control
+                return;
+            }
+        }
         
         // Voltage saturation check: Check every xx1 minutes (VOLTAGE_SATURATION_CHECK_INTERVAL_MS)
         unsigned long current_time = millis();
@@ -973,17 +1042,37 @@ void update_current_screen() {
     // WiFi status display updates on screen 1 (home screen)
     if (current_screen_id == SCREEN_HOME) {
         update_screen1_wifi_status();
+        // Update M2 RTC time label only when battery_detected is false (rate limited to 2Hz = 500ms)
+        if (!battery_detected && screen1_rtc_time_label != nullptr) {
+            unsigned long current_time = millis();
+            const unsigned long RTC_UPDATE_INTERVAL = 500; // 2Hz = 500ms
+            
+            if (current_time - last_rtc_update_time >= RTC_UPDATE_INTERVAL) {
+                char rtc_text[50];
+                sprintf(rtc_text, "M2 rtc time: %04d-%02d-%02d %02d:%02d:%02d",
+                        m2Time.year, m2Time.month, m2Time.date,
+                        m2Time.hour, m2Time.minute, m2Time.second);
+                lv_label_set_text(screen1_rtc_time_label, rtc_text);
+                lv_obj_clear_flag(screen1_rtc_time_label, LV_OBJ_FLAG_HIDDEN);
+                last_rtc_update_time = current_time;
+            }
+        } else if (battery_detected && screen1_rtc_time_label != nullptr) {
+            // Hide label when battery is detected
+            lv_obj_add_flag(screen1_rtc_time_label, LV_OBJ_FLAG_HIDDEN);
+        }
     }
     
+#if CAN_RTC_DEBUG
     // Time debug display updates only when on time debug screen
     if (current_screen_id == SCREEN_TIME_DEBUG) {
         update_time_debug_display();
     }
+#endif // CAN_RTC_DEBUG
     
     // BLE debug display updates only when on BLE debug screen
-    if (current_screen_id == SCREEN_BLE_DEBUG) {
-        update_ble_debug_display();
-    }
+    // if (current_screen_id == SCREEN_BLE_DEBUG) {
+    //     update_ble_debug_display();
+    // }
     
     // Charging control (runs only in charging states, once per second)
     update_charging_control();
@@ -1114,6 +1203,9 @@ void update_current_screen() {
             lv_obj_set_style_text_color(screen7_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
         } else if (charge_stop_reason == CHARGE_STOP_EMERGENCY) {
             lv_label_set_text(screen7_status_label, "Charging stopped by user");
+            lv_obj_set_style_text_color(screen7_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
+        } else if (charge_stop_reason == CHARGE_STOP_110_PERCENT_CAPACITY) {
+            lv_label_set_text(screen7_status_label, "110% capacity reached");
             lv_obj_set_style_text_color(screen7_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
         } else {
             // Default message
@@ -1264,6 +1356,7 @@ screen_id_t determine_screen_from_state() {
     if (current_app_state == STATE_EMERGENCY_STOP) {
         return SCREEN_EMERGENCY_STOP;
     }
+#if CAN_RTC_DEBUG
     // Don't switch away from CAN debug screen based on voltage
     if (current_screen_id == SCREEN_CAN_DEBUG) {
         return SCREEN_CAN_DEBUG;
@@ -1272,10 +1365,11 @@ screen_id_t determine_screen_from_state() {
     if (current_screen_id == SCREEN_TIME_DEBUG) {
         return SCREEN_TIME_DEBUG;
     }
+#endif // CAN_RTC_DEBUG
     // Don't switch away from BLE debug screen based on voltage
-    if (current_screen_id == SCREEN_BLE_DEBUG) {
-        return SCREEN_BLE_DEBUG;
-    }
+    // if (current_screen_id == SCREEN_BLE_DEBUG) {
+    //     return SCREEN_BLE_DEBUG;
+    // }
     if (battery_detected && sensorData.volt >= 9.0f) {
         return SCREEN_BATTERY_DETECTED;
     }
@@ -1401,10 +1495,9 @@ void update_table_values() {
         float rpm = VFD_FREQ_TO_RPM(freq_hz);
         lv_table_set_cell_value(data_table, 1, 3, String((int)rpm).c_str());
 
-        // Update entry counter (column 4)
-        static int entry_counter = 0;
+        // Update log number (column 4)
         lv_table_set_cell_value(data_table, 1, 4,
-            String(entry_counter).c_str());
+            String(log_num_sdhc).c_str());
     }
 
     // Unlock LVGL
@@ -1554,34 +1647,41 @@ void update_can_debug_display(uint32_t id, uint8_t* data, uint8_t length) {
     }
 }
 
-// Update time debug screen with M2 RTC time
+// Update time debug screen with M2 RTC time (rate limited to 2Hz = 500ms)
 void update_time_debug_display() {
     if (screen16_time_label != nullptr && current_screen_id == SCREEN_TIME_DEBUG) {
-        lvgl_port_lock(-1);
+        unsigned long current_time = millis();
+        const unsigned long RTC_UPDATE_INTERVAL = 500; // 2Hz = 500ms
+        
+        // Rate limit to 2Hz
+        if (current_time - last_rtc_update_time >= RTC_UPDATE_INTERVAL) {
+            lvgl_port_lock(-1);
 
-        // Convert day_of_week from M2 format (1=Sunday) to display format (1=Monday)
-        // M2: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday
-        // Display: 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday
-        uint8_t display_day = m2Time.day_of_week;
-        if (display_day == 1) {
-            display_day = 7;  // Sunday becomes 7
-        } else {
-            display_day = display_day - 1;  // Monday=2 becomes 1, etc.
+            // Convert day_of_week from M2 format (1=Sunday) to display format (1=Monday)
+            // M2: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday
+            // Display: 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday
+            uint8_t display_day = m2Time.day_of_week;
+            if (display_day == 1) {
+                display_day = 7;  // Sunday becomes 7
+            } else {
+                display_day = display_day - 1;  // Monday=2 becomes 1, etc.
+            }
+
+            // Day names for display (1=Monday)
+            const char* day_names[] = {"", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+
+            // Format time string: 24hr format, day name, date
+            char time_text[200];
+            sprintf(time_text, "Time: %02d:%02d:%02d\nDay: %d (%s)\nDate: %04d-%02d-%02d",
+                m2Time.hour, m2Time.minute, m2Time.second,
+                display_day, (display_day >= 1 && display_day <= 7) ? day_names[display_day] : "Unknown",
+                m2Time.year, m2Time.month, m2Time.date);
+
+            lv_label_set_text(screen16_time_label, time_text);
+            last_rtc_update_time = current_time;
+
+            lvgl_port_unlock();
         }
-
-        // Day names for display (1=Monday)
-        const char* day_names[] = {"", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
-
-        // Format time string: 24hr format, day name, date
-        char time_text[200];
-        sprintf(time_text, "Time: %02d:%02d:%02d\nDay: %d (%s)\nDate: %04d-%02d-%02d",
-            m2Time.hour, m2Time.minute, m2Time.second,
-            display_day, (display_day >= 1 && display_day <= 7) ? day_names[display_day] : "Unknown",
-            m2Time.year, m2Time.month, m2Time.date);
-
-        lv_label_set_text(screen16_time_label, time_text);
-
-        lvgl_port_unlock();
     }
 }
 
@@ -1730,14 +1830,14 @@ void screen1_time_debug_btnhandler(lv_event_t * e) {
 }
 
 // Screen 1 BLE Debug button event handler
-void screen1_ble_debug_btnhandler(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if(code == LV_EVENT_CLICKED) {
-        Serial.println("[SCREEN] Switching to BLE debug screen");
-        // Switch to BLE debug screen (no state change needed)
-        switch_to_screen(SCREEN_BLE_DEBUG);
-    }
-}
+// void screen1_ble_debug_btnhandler(lv_event_t * e) {
+//     lv_event_code_t code = lv_event_get_code(e);
+//     if(code == LV_EVENT_CLICKED) {
+//         Serial.println("[SCREEN] Switching to BLE debug screen");
+//         // Switch to BLE debug screen (no state change needed)
+//         switch_to_screen(SCREEN_BLE_DEBUG);
+//     }
+// }
 
 void screen2_confirm_agree_event_handler(lv_event_t * e) {
     lv_event_code_t code = lv_event_get_code(e);
@@ -1861,7 +1961,14 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         // Log charge start
         if (sd_logging_initialized && selected_battery_profile != nullptr) {
             current_charge_serial = getNextSerialNumber();
-            logChargeStart(current_charge_serial, selected_battery_profile);
+            if (logChargeStart(current_charge_serial, selected_battery_profile)) {
+                // Update log_num_sdhc after successful log write
+                log_num_sdhc = (int32_t)current_charge_serial;
+                // Update table display immediately
+                if (data_table != nullptr) {
+                    lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
+                }
+            }
         }
 
         // Switch to charging start state
@@ -2022,7 +2129,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v3.2");
+    lv_label_set_text(title, "GCU 3kW Charger v3.4");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2078,11 +2185,30 @@ void create_screen_1()
         // Auto-size table based on content
         lv_obj_set_width(data_table, LV_SIZE_CONTENT);
         lv_obj_set_height(data_table, LV_SIZE_CONTENT);
+
+        // Initialize log_num_sdhc from SD card (latest complete log number)
+        if (sd_logging_initialized) {
+            uint32_t nextSerial = getNextSerialNumber();
+            if (nextSerial > 1) {
+                log_num_sdhc = (int32_t)(nextSerial - 1);  // Latest complete log = next - 1
+            } else {
+                log_num_sdhc = -1;  // No logs yet
+            }
+            // Update table display with initial value
+            lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
+        }
     }
 
     // Move table to screen_1
     lv_obj_set_parent(data_table, screen_1);
     lv_obj_set_pos(data_table, 12, 110);
+
+    // M2 RTC Time label (20px below table)
+    screen1_rtc_time_label = lv_label_create(screen_1);
+    lv_label_set_text(screen1_rtc_time_label, "M2 rtc time: -- --");
+    lv_obj_set_style_text_font(screen1_rtc_time_label, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen1_rtc_time_label, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
+    lv_obj_align(screen1_rtc_time_label, LV_ALIGN_TOP_LEFT, 12, 230);  // 20px below table (110 + ~100 table height + 20)
 
     // Battery profiles not applicable for screen 1 - removed container creation
 
@@ -2096,6 +2222,7 @@ void create_screen_1()
     lv_obj_set_flex_align(screen1_button_container, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(screen1_button_container, LV_OBJ_FLAG_SCROLLABLE);
 
+#if CAN_RTC_DEBUG
     // CAN Debug button
     lv_obj_t* screen1_can_debug_btn = lv_btn_create(screen1_button_container);
     lv_obj_set_size(screen1_can_debug_btn, 300, 80);
@@ -2121,19 +2248,20 @@ void create_screen_1()
     lv_obj_set_style_text_font(screen1_time_debug_label, &lv_font_montserrat_20, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen1_time_debug_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen1_time_debug_label);
+#endif // CAN_RTC_DEBUG
 
-    // BLE Debug button (next to Time Debug button)
-    lv_obj_t* screen1_ble_debug_btn = lv_btn_create(screen1_button_container);
-    lv_obj_set_size(screen1_ble_debug_btn, 300, 80);
-    lv_obj_set_style_bg_color(screen1_ble_debug_btn, lv_color_hex(0x4169E1), LV_PART_MAIN);  // Royal blue button
-    lv_obj_add_event_cb(screen1_ble_debug_btn, screen1_ble_debug_btnhandler, LV_EVENT_CLICKED, NULL);
-    lv_obj_clear_flag(screen1_ble_debug_btn, LV_OBJ_FLAG_SCROLLABLE);
+    // BLE Debug button (next to Time Debug button) - commented out, not required
+    // lv_obj_t* screen1_ble_debug_btn = lv_btn_create(screen1_button_container);
+    // lv_obj_set_size(screen1_ble_debug_btn, 300, 80);
+    // lv_obj_set_style_bg_color(screen1_ble_debug_btn, lv_color_hex(0x4169E1), LV_PART_MAIN);  // Royal blue button
+    // lv_obj_add_event_cb(screen1_ble_debug_btn, screen1_ble_debug_btnhandler, LV_EVENT_CLICKED, NULL);
+    // lv_obj_clear_flag(screen1_ble_debug_btn, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t* screen1_ble_debug_label = lv_label_create(screen1_ble_debug_btn);
-    lv_label_set_text(screen1_ble_debug_label, "BLE Debug");
-    lv_obj_set_style_text_font(screen1_ble_debug_label, &lv_font_montserrat_20, LV_PART_MAIN);
-    lv_obj_set_style_text_color(screen1_ble_debug_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
-    lv_obj_center(screen1_ble_debug_label);
+    // lv_obj_t* screen1_ble_debug_label = lv_label_create(screen1_ble_debug_btn);
+    // lv_label_set_text(screen1_ble_debug_label, "BLE Debug");
+    // lv_obj_set_style_text_font(screen1_ble_debug_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    // lv_obj_set_style_text_color(screen1_ble_debug_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
+    // lv_obj_center(screen1_ble_debug_label);
 
     // v4.50: Add M2 state status box (top-left corner) - Screen 1
     createM2StateBox(screen_1, "screen_1");
@@ -2171,7 +2299,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v3.2");
+    lv_label_set_text(title, "GCU 3kW Charger v3.4");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2343,7 +2471,9 @@ void create_screen_3(void) {
 
     // Status label (charging start - waiting for 1A)
     lv_obj_t *status_label_3 = lv_label_create(screen_3);
-    lv_label_set_text(status_label_3, "Starting charge... Waiting for 1A");
+    char precharge_text[60];
+    sprintf(precharge_text, "Step 1: Precharge, upto %.1f amps.", PRECHARGE_AMPS);
+    lv_label_set_text(status_label_3, precharge_text);
     lv_obj_set_style_text_color(status_label_3, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
     lv_obj_set_style_text_font(status_label_3, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(status_label_3, LV_ALIGN_TOP_MID, 0, 60);
@@ -2428,7 +2558,7 @@ void create_screen_4(void) {
 
     // Status label (CC charging in progress)
     lv_obj_t *status_label_4 = lv_label_create(screen_4);
-    lv_label_set_text(status_label_4, "CC Charging in progress...");
+    lv_label_set_text(status_label_4, "Step 2, constant current charge");
     lv_obj_set_style_text_color(status_label_4, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
     lv_obj_set_style_text_font(status_label_4, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(status_label_4, LV_ALIGN_TOP_MID, 0, 60);
@@ -2512,7 +2642,7 @@ void create_screen_5(void) {
 
     // Status label (CV charging in progress)
     lv_obj_t *status_label_5 = lv_label_create(screen_5);
-    lv_label_set_text(status_label_5, "CV Charging in progress...");
+    lv_label_set_text(status_label_5, "Step 3, Constant voltage charge");
     lv_obj_set_style_text_color(status_label_5, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
     lv_obj_set_style_text_font(status_label_5, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(status_label_5, LV_ALIGN_TOP_MID, 0, 60);
@@ -2946,7 +3076,8 @@ void create_screen_16(void) {
     Serial.println("[SCREEN] Screen 16 (Time Debug) created successfully");
 }
 
-//screen 17 - BLE debug screen
+//screen 17 - BLE debug screen - commented out, not required
+/*
 void create_screen_17(void) {
     screen_17 = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(screen_17, lv_color_hex(0xADD8E6), LV_PART_MAIN);  // Light blue background
@@ -3006,3 +3137,4 @@ void create_screen_17(void) {
 
     Serial.println("[SCREEN] Screen 17 (BLE Debug) created successfully");
 }
+*/

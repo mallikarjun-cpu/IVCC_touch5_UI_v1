@@ -140,8 +140,10 @@ void can_task(void* parameter) {
     while (true) {
         // Check for received messages
         if (receive_can_frame(&rx_message)) {
+#if CAN_RTC_DEBUG
             // Update CAN debug screen with received frame
             update_can_debug_display(rx_message.identifier, rx_message.data, rx_message.data_length_code);
+#endif // CAN_RTC_DEBUG
 
             // Process received frame based on ID
             switch (rx_message.identifier) {
