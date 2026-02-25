@@ -55,7 +55,7 @@ Board *board = nullptr;
 
 void setup()
 {
-    String title = "LVGL porting example";
+//    String title = "LVGL porting example";
 
     Serial.begin(115200);
     Serial.setTimeout(10); // Prevent serial blocking
@@ -104,10 +104,10 @@ void setup()
     rs485_init();
     delay(100); // Small delay for serial stabilization
 
-    Serial.println("Creating UI");
     /* Initialize SD card before screens so screen 1 can show entry number from charge_log */
     initializeSDCard();
 
+    Serial.println("Creating UI");
     /* Lock the mutex due to the LVGL APIs are not thread-safe */
     lvgl_port_lock(-1);
 
@@ -127,7 +127,7 @@ void setup()
     delay(200);
     send_contactor_control(CONTACTOR_OPEN);
     
-    Serial.println("End of setup, setup success! ------ v3.6------  \n -----");
+    Serial.println("End of setup, setup success! ------ v3.7------  \n -----");
 }
 
 void loop()

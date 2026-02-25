@@ -209,6 +209,12 @@ String getChargeStopReasonString(charge_stop_reason_t reason) {
             return "VOLT_LIMIT";
         case CHARGE_STOP_HIGH_TEMP:
             return "HIGH_TEMP";
+        case CHARGE_STOP_110_PERCENT_CAPACITY:
+            return "110_PERCENT";
+        case CHARGE_STOP_BATTERY_DISCONNECTED:
+            return "BATT_DISCONNECT";
+        case CHARGE_STOP_VOLT_OR_CURRENT_ERROR:
+            return "VOLT_CURR_ERR";
         case CHARGE_STOP_NONE:
         default:
             return "UNKNOWN";

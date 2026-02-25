@@ -70,6 +70,7 @@ static unsigned long final_charging_time_ms = 0;  // Final charging time when co
 static unsigned long final_remaining_time_ms = 0;  // Final remaining time when complete (stops updating)
 static bool charging_complete = false;  // Flag to stop timer updates after completion
 static bool pending_stop_command = false;  // Flag to send stop command after screen loads
+static bool current_flow_start = false;  // True after current >= 1.1 A in step 1; used for disconnect and timeout
 
 // Ah calculation variables
 static float accumulated_ah = 0.0f;  // Accumulated Ah (default 0.0)
@@ -557,6 +558,7 @@ void update_charging_control() {
         
         // STEP 4: Set stop reason to high temperature
         charge_stop_reason = CHARGE_STOP_HIGH_TEMP;
+        current_flow_start = false;
         
         // Log charge complete
         if (sd_logging_initialized) {
@@ -595,6 +597,59 @@ void update_charging_control() {
 // State-specific charging logic
     // [1] STATE_CHARGING_START: Maintain PRECHARGE_AMPS (2A) for PRECHARGE_TIME (3 minutes), then transition to CC
     if (current_app_state == STATE_CHARGING_START) {
+        // Set current_flow_start once current >= 1.1 A (allows 0 A before that; 1.0 A below = disconnect after flow)
+        if (safe_actual_current >= 1.1f) {
+            current_flow_start = true;
+        }
+        // Battery disconnected: current had flowed but now dropped below 1.0 A
+        if (current_flow_start && safe_actual_current < 1.0f) {
+            Serial.println("[CHARGING] Battery disconnected (current < 1.0 A after flow), emergency stop");
+            send_contactor_control(CONTACTOR_OPEN);
+            delay(10);
+            rs485_sendFrequencyCommand(0);
+            current_frequency = 0;
+            delay(10);
+            if (charging_start_time > 0 && !charging_complete) {
+                final_charging_time_ms = millis() - charging_start_time;
+                charging_complete = true;
+            }
+            charge_stop_reason = CHARGE_STOP_BATTERY_DISCONNECTED;
+            if (sd_logging_initialized) {
+                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
+                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+            }
+            current_flow_start = false;
+            pending_stop_command = true;
+            current_app_state = STATE_EMERGENCY_STOP;
+            switch_to_screen(SCREEN_EMERGENCY_STOP);
+            return;
+        }
+        // Step 1 safety: no current flow within timeout, or RPM over limit
+        unsigned long step1_elapsed = (charging_start_time > 0) ? (millis() - charging_start_time) : 0;
+        float step1_rpm = VFD_FREQ_TO_RPM(current_frequency / 100.0f);
+        if ((step1_elapsed >= PRECHARGE_CURRENT_FLOW_TIMEOUT_MS && !current_flow_start) ||
+            (step1_rpm > (float)PRECHARGE_RPM_LIMIT)) {
+            Serial.println("[CHARGING] Volt or current error (no flow in time or RPM > limit), emergency stop");
+            send_contactor_control(CONTACTOR_OPEN);
+            delay(10);
+            rs485_sendFrequencyCommand(0);
+            current_frequency = 0;
+            delay(10);
+            if (charging_start_time > 0 && !charging_complete) {
+                final_charging_time_ms = millis() - charging_start_time;
+                charging_complete = true;
+            }
+            charge_stop_reason = CHARGE_STOP_VOLT_OR_CURRENT_ERROR;
+            if (sd_logging_initialized) {
+                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
+                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+            }
+            current_flow_start = false;
+            pending_stop_command = true;
+            current_app_state = STATE_EMERGENCY_STOP;
+            switch_to_screen(SCREEN_EMERGENCY_STOP);
+            return;
+        }
         // Use CC logic to maintain current at PRECHARGE_AMPS (2A) - like CC but fixed at precharge level
         uint16_t precharge_target_0_01A = (uint16_t)(PRECHARGE_AMPS * 100);  // Convert 2A to 0.01A units
         new_frequency = rs485_CalcFrequencyFor_CC(current_frequency, precharge_target_0_01A, actual_current_0_01A);
@@ -644,13 +699,14 @@ void update_charging_control() {
                                  final_charging_time_ms, accumulated_ah, charge_stop_reason);
             }
             
-            // Transition to complete state
+// Transition to complete state
             current_app_state = STATE_CHARGING_COMPLETE;
+            current_flow_start = false;
             Serial.println("[CHARGING] Transitioned to charging complete state (voltage limit during precharge)");
-            
+
             // Set flag to send stop command after screen 6 loads
             pending_stop_command = true;
-            
+
             // STEP 3: Move to screen 6
             switch_to_screen(SCREEN_CHARGING_COMPLETE);
         }
@@ -681,6 +737,29 @@ void update_charging_control() {
 
     // [2] STATE_CHARGING_CC: Constant Current mode until target voltage reached
     else if (current_app_state == STATE_CHARGING_CC) {
+        // Battery disconnected in step 2
+        if (current_flow_start && safe_actual_current < 1.0f) {
+            Serial.println("[CHARGING_CC] Battery disconnected (current < 1.0 A), emergency stop");
+            send_contactor_control(CONTACTOR_OPEN);
+            delay(10);
+            rs485_sendFrequencyCommand(0);
+            current_frequency = 0;
+            delay(10);
+            if (charging_start_time > 0 && !charging_complete) {
+                final_charging_time_ms = millis() - charging_start_time;
+                charging_complete = true;
+            }
+            charge_stop_reason = CHARGE_STOP_BATTERY_DISCONNECTED;
+            if (sd_logging_initialized) {
+                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
+                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+            }
+            current_flow_start = false;
+            pending_stop_command = true;
+            current_app_state = STATE_EMERGENCY_STOP;
+            switch_to_screen(SCREEN_EMERGENCY_STOP);
+            return;
+        }
         new_frequency = rs485_CalcFrequencyFor_CC(current_frequency, target_current_0_01A, actual_current_0_01A); 
         
         // Debug logging
@@ -736,6 +815,7 @@ void update_charging_control() {
                 
                 // Set stop reason to 110% capacity reached
                 charge_stop_reason = CHARGE_STOP_110_PERCENT_CAPACITY;
+                current_flow_start = false;
                 
                 // Log charge complete
                 if (sd_logging_initialized) {
@@ -785,6 +865,7 @@ void update_charging_control() {
                 // Transition to voltage saturation state (Screen 8)
                 current_app_state = STATE_CHARGING_VOLTAGE_SATURATION;
                 voltage_saturation_cv_start_time = millis();  // Record CV start time for screen 8
+                current_flow_start = false;  // Reset on saturate entry
                 Serial.println("[VOLT_SAT] Transitioning to voltage saturation state (Screen 8)");
                 
                 // Immediately calculate and send CV frequency command using saturation voltage
@@ -846,6 +927,29 @@ void update_charging_control() {
 
     // [3] STATE_CHARGING_CV: Constant Voltage mode
     else if (current_app_state == STATE_CHARGING_CV) {
+        // Battery disconnected in step 3
+        if (current_flow_start && safe_actual_current < 1.0f) {
+            Serial.println("[CHARGING_CV] Battery disconnected (current < 1.0 A), emergency stop");
+            send_contactor_control(CONTACTOR_OPEN);
+            delay(10);
+            rs485_sendFrequencyCommand(0);
+            current_frequency = 0;
+            delay(10);
+            if (charging_start_time > 0 && !charging_complete) {
+                final_charging_time_ms = millis() - charging_start_time;
+                charging_complete = true;
+            }
+            charge_stop_reason = CHARGE_STOP_BATTERY_DISCONNECTED;
+            if (sd_logging_initialized) {
+                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
+                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+            }
+            current_flow_start = false;
+            pending_stop_command = true;
+            current_app_state = STATE_EMERGENCY_STOP;
+            switch_to_screen(SCREEN_EMERGENCY_STOP);
+            return;
+        }
         new_frequency = rs485_CalcFrequencyFor_CV(current_frequency, target_voltage_0_01V, actual_voltage_0_01V);
         
         // Debug logging
@@ -923,6 +1027,7 @@ void update_charging_control() {
             
             // Set stop reason and transition to complete state
             charge_stop_reason = CHARGE_STOP_COMPLETE;
+            current_flow_start = false;
             
             // Log charge complete
             if (sd_logging_initialized) {
@@ -942,6 +1047,29 @@ void update_charging_control() {
         
     // [4] STATE_CHARGING_VOLTAGE_SATURATION: Constant Voltage mode using saturation voltage as target
     else if (current_app_state == STATE_CHARGING_VOLTAGE_SATURATION) {
+        // Battery disconnected in voltage saturation
+        if (current_flow_start && safe_actual_current < 1.0f) {
+            Serial.println("[CHARGING_VOLT_SAT] Battery disconnected (current < 1.0 A), emergency stop");
+            send_contactor_control(CONTACTOR_OPEN);
+            delay(10);
+            rs485_sendFrequencyCommand(0);
+            current_frequency = 0;
+            delay(10);
+            if (charging_start_time > 0 && !charging_complete) {
+                final_charging_time_ms = millis() - charging_start_time;
+                charging_complete = true;
+            }
+            charge_stop_reason = CHARGE_STOP_BATTERY_DISCONNECTED;
+            if (sd_logging_initialized) {
+                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
+                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+            }
+            current_flow_start = false;
+            pending_stop_command = true;
+            current_app_state = STATE_EMERGENCY_STOP;
+            switch_to_screen(SCREEN_EMERGENCY_STOP);
+            return;
+        }
         // Use the recorded saturation voltage as target instead of battery profile cutoff voltage
         uint16_t saturation_voltage_0_01V = (uint16_t)(voltage_saturation_detected_voltage * 100);
         
@@ -993,6 +1121,7 @@ void update_charging_control() {
             
             // Set stop reason to voltage saturation
             charge_stop_reason = CHARGE_STOP_VOLTAGE_SATURATION;
+            current_flow_start = false;
             
             // Log charge complete
             if (sd_logging_initialized) {
@@ -1091,6 +1220,7 @@ void update_current_screen() {
                 cv_start_time = 0;
                     cc_state_duration_for_timer = 0;
                     pending_stop_command = false;
+                    current_flow_start = false;
                     battery_detected = false;
                     
                     // Clear selected battery profile - user must select again from scratch
@@ -1188,6 +1318,12 @@ void update_current_screen() {
             lv_obj_set_style_text_color(screen7_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
         } else if (charge_stop_reason == CHARGE_STOP_110_PERCENT_CAPACITY) {
             lv_label_set_text(screen7_status_label, "110% capacity reached");
+            lv_obj_set_style_text_color(screen7_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
+        } else if (charge_stop_reason == CHARGE_STOP_BATTERY_DISCONNECTED) {
+            lv_label_set_text(screen7_status_label, "Battery disconnected error");
+            lv_obj_set_style_text_color(screen7_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
+        } else if (charge_stop_reason == CHARGE_STOP_VOLT_OR_CURRENT_ERROR) {
+            lv_label_set_text(screen7_status_label, "Volt or current error");
             lv_obj_set_style_text_color(screen7_status_label, lv_color_hex(0x8B0000), LV_PART_MAIN);  // Dark red
         } else {
             // Default message
@@ -1775,6 +1911,7 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         final_charging_time_ms = 0;
         final_remaining_time_ms = 0;
         pending_stop_command = false;  // Reset stop command flag
+        current_flow_start = false;
         
         // Reset Ah calculation
         accumulated_ah = 0.0f;
@@ -1869,6 +2006,7 @@ void emergency_stop_event_handler(lv_event_t * e) {
         
         // Set stop reason
         charge_stop_reason = CHARGE_STOP_EMERGENCY;
+        current_flow_start = false;
         
         // Log charge complete
         if (sd_logging_initialized) {
@@ -1925,6 +2063,7 @@ void home_button_event_handler(lv_event_t * e) {
             cv_start_time = 0;
             cc_state_duration_for_timer = 0;
             pending_stop_command = false;  // Reset stop command flag
+            current_flow_start = false;
             
             // Ensure battery_detected is false
             battery_detected = false;
@@ -1955,7 +2094,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v3.6");
+    lv_label_set_text(title, "GCU 3kW Charger v3.7");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2098,7 +2237,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v3.6");
+    lv_label_set_text(title, "GCU 3kW Charger v3.7");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);

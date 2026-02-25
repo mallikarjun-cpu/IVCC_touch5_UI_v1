@@ -16,6 +16,9 @@
 // Precharge timing macros (Screen 3 - Charging Start)
 #define PRECHARGE_TIME_MS (1 * 60 * 1000)  // 3 minutes in milliseconds
 #define PRECHARGE_AMPS 2.0f                // 2.0 Amps threshold
+// Step 1 safety: current must flow within this time, else volt_or_current error
+#define PRECHARGE_CURRENT_FLOW_TIMEOUT_MS (59 * 1000)  // 59 seconds (precharge can be 1 min)
+#define PRECHARGE_RPM_LIMIT 3700           // RPM above this in step 1 -> volt_or_current error
 
 // Temperature threshold macro
 #define MAX_TEMP_THRESHOLD 80.0f           // 80.0 degrees Celsius
@@ -71,7 +74,8 @@ typedef enum {
     CHARGE_STOP_VOLTAGE_LIMIT_PRECHARGE = 4, // Voltage limit reached during precharge
     CHARGE_STOP_HIGH_TEMP = 5,         // Emergency stop due to high temperature
     CHARGE_STOP_110_PERCENT_CAPACITY = 6, // Charge stopped: 110% capacity reached, Ah limit
-    // Future reasons can be added here
+    CHARGE_STOP_BATTERY_DISCONNECTED = 7, // Battery disconnected (current dropped below 1.0 A after flow)
+    CHARGE_STOP_VOLT_OR_CURRENT_ERROR = 8 // Step 1: no current flow in time or RPM > limit
 } charge_stop_reason_t;
 
 extern screen_id_t current_screen_id;
