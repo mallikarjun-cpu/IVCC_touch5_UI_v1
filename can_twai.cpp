@@ -27,6 +27,15 @@ int16_t bigEndianToInt16(uint8_t* data) {
     return (int16_t)val;
 }
 
+// Convert m2Time to "time of month" in seconds (day 1-31 + time of day). Used for M2 heartbeat.
+uint32_t calc_timeofmonth(void) {
+    uint32_t d = (uint32_t)(m2Time.date >= 1 && m2Time.date <= 31 ? m2Time.date : 1);
+    uint32_t h = (uint32_t)(m2Time.hour <= 23 ? m2Time.hour : 0);
+    uint32_t m = (uint32_t)(m2Time.minute <= 59 ? m2Time.minute : 0);
+    uint32_t s = (uint32_t)(m2Time.second <= 59 ? m2Time.second : 0);
+    return (d * 86400UL) + (h * 3600UL) + (m * 60UL) + s;
+}
+
 // CAN configuration
 static twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
 

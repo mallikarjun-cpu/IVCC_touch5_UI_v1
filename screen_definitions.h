@@ -14,8 +14,8 @@
 #define VOLTAGE_SATURATION_THRESHOLD_V 0.5f                   // 0.5V threshold for saturation detection
 
 // Precharge timing macros (Screen 3 - Charging Start)
-#define PRECHARGE_TIME_MS (2 * 60 * 1000)  // 3 minutes in milliseconds
-#define PRECHARGE_AMPS 10.0f                // 2.0 Amps threshold
+#define PRECHARGE_TIME_MS (1 * 60 * 1000)  // 3 minutes in milliseconds
+#define PRECHARGE_AMPS 2.0f                // 2.0 Amps threshold
 
 // Temperature threshold macro
 #define MAX_TEMP_THRESHOLD 80.0f           // 80.0 degrees Celsius
@@ -35,6 +35,7 @@ extern lv_obj_t* screen_8;
 extern lv_obj_t* screen_13;
 extern lv_obj_t* screen_16;
 extern lv_obj_t* screen_17;
+extern lv_obj_t* screen_18;
 
 // Screen management enums and variables
 typedef enum {
@@ -48,7 +49,8 @@ typedef enum {
     SCREEN_VOLTAGE_SATURATION, // Screen 8 - Voltage saturation detected
     SCREEN_CAN_DEBUG = 13,     // Screen 13 - CAN debug screen
     SCREEN_TIME_DEBUG = 16,    // Screen 16 - Time debug screen
-    SCREEN_BLE_DEBUG = 17      // Screen 17 - BLE debug screen
+    SCREEN_BLE_DEBUG = 17,     // Screen 17 - BLE debug screen
+    SCREEN_M2_LOST = 18        // Screen 18 - M2 connection failed or lost
 } screen_id_t;
 
 typedef enum {
@@ -99,6 +101,7 @@ void create_screen_8(void); //screen 8 - Voltage saturation detected
 void create_screen_13(void); //screen 13 - CAN debug screen
 void create_screen_16(void); //screen 16 - Time debug screen
 // void create_screen_17(void); //screen 17 - BLE debug screen - commented out, not required
+void create_screen_18(void); //screen 18 - M2 connection failed or lost
 
 // Screen management functions
 void initialize_all_screens(void);
@@ -106,6 +109,7 @@ void switch_to_screen(screen_id_t screen_id);
 void update_current_screen(void);
 screen_id_t determine_screen_from_state(void);
 void update_screen_based_on_state(void);
+void check_m2_heartbeat(void);  // Call every 3s from loop; first run after 3s from startup
 
 // Table and UI update functions
 void update_table_values(void);

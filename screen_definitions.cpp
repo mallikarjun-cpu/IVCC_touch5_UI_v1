@@ -67,6 +67,7 @@ lv_obj_t* screen_8 = nullptr; //screen 8 - Voltage saturation detected
 lv_obj_t* screen_13 = nullptr; //screen 13 - CAN debug screen
 lv_obj_t* screen_16 = nullptr; //screen 16 - Time debug screen
 lv_obj_t* screen_17 = nullptr; //screen 17 - BLE debug screen
+lv_obj_t* screen_18 = nullptr; //screen 18 - M2 connection failed or lost
 
 // Shared UI objects (reused between screens)
 static lv_obj_t* status_label = nullptr;
@@ -155,6 +156,9 @@ static lv_obj_t* screen17_wifi_status_label = nullptr;
 static lv_obj_t* screen17_ble_status_label = nullptr;
 static lv_obj_t* screen17_ble_info_label = nullptr;
 
+// screen 18 M2 lost - RTC time display (same position/rate as screen 1)
+static lv_obj_t* screen18_rtc_time_label = nullptr;
+
 // Reboot countdown variables
 static bool reboot_countdown_active = false;
 static unsigned long reboot_countdown_start_time = 0;
@@ -197,6 +201,11 @@ static const m2_state_config_t m2_state_configs[] = {
     {M2_STATE_STANDBY, "M2State1", lv_color_hex(0x0000FF), lv_color_hex(0x0000FF), "M2 State 1"},
     {M2_STATE_INIT, "M2State2", lv_color_hex(0x00FF00), lv_color_hex(0x00FF00), "M2 State 2"},
 };
+
+// M2 heartbeat: RTC-based connection check (every 3s, first check after 3s from startup)
+static bool m2_connection_lost = false;
+static uint32_t past_m2_rtc = 0;
+static bool first_heartbeat_compare_done = false;  // Skip first comparison (startup/default RTC)
 
 // M2 Status Manager
 static m2_status_manager_t m2_manager = {
@@ -349,6 +358,7 @@ void initialize_all_screens() {
     create_screen_6();   // Charging complete screen
     create_screen_7();   // Emergency stop screen
     create_screen_8();   // Voltage saturation detected screen
+    create_screen_18();  // M2 connection failed or lost screen
 #if CAN_RTC_DEBUG
     create_screen_13();  // CAN debug screen
     create_screen_16();  // Time debug screen
@@ -391,6 +401,9 @@ void switch_to_screen(screen_id_t screen_id) {
         case SCREEN_VOLTAGE_SATURATION:
             target_screen = screen_8;
             break;
+        case SCREEN_M2_LOST:
+            target_screen = screen_18;
+            break;
 #if CAN_RTC_DEBUG
         case SCREEN_CAN_DEBUG:
             target_screen = screen_13;
@@ -408,6 +421,17 @@ void switch_to_screen(screen_id_t screen_id) {
     }
 
     if (target_screen != nullptr) {
+        // On first entry to M2 lost screen only: 0 rpm, stop motor, open contactor (once)
+        if (screen_id == SCREEN_M2_LOST && current_screen_id != SCREEN_M2_LOST) {
+            rs485_sendFrequencyCommand(0);
+            delay(5);
+            Serial.println("[M2] 0 rpm sent");
+            rs485_sendStopCommand();
+            delay(5);
+            Serial.println("[M2] Stop motor sent");
+            send_contactor_control(CONTACTOR_OPEN);
+            Serial.println("[M2] Contactor open sent");
+        }
         // Update current screen tracking
         current_screen_id = screen_id;
 
@@ -1061,6 +1085,19 @@ void update_current_screen() {
             lv_obj_add_flag(screen1_rtc_time_label, LV_OBJ_FLAG_HIDDEN);
         }
     }
+    // Screen 18: update M2 RTC date/time (same position and 500ms rate as screen 1)
+    if (current_screen_id == SCREEN_M2_LOST && screen18_rtc_time_label != nullptr) {
+        unsigned long current_time = millis();
+        const unsigned long RTC_UPDATE_INTERVAL = 500;  // 2Hz = 500ms
+        if (current_time - last_rtc_update_time >= RTC_UPDATE_INTERVAL) {
+            char rtc_text_18[50];
+            sprintf(rtc_text_18, "M2 rtc time: %04d-%02d-%02d %02d:%02d:%02d",
+                    m2Time.year, m2Time.month, m2Time.date,
+                    m2Time.hour, m2Time.minute, m2Time.second);
+            lv_label_set_text(screen18_rtc_time_label, rtc_text_18);
+            last_rtc_update_time = current_time;
+        }
+    }
     
 #if CAN_RTC_DEBUG
     // Time debug display updates only when on time debug screen
@@ -1337,6 +1374,10 @@ void update_current_screen() {
 
 // Determine which screen should be shown based on current state
 screen_id_t determine_screen_from_state() {
+    // M2 connection lost overrides all other states
+    if (m2_connection_lost) {
+        return SCREEN_M2_LOST;
+    }
     // Priority-based screen selection
     if (current_app_state == STATE_CHARGING_START) {
         return SCREEN_CHARGING_STARTED;
@@ -1384,6 +1425,27 @@ void update_screen_based_on_state() {
     if (target_screen != current_screen_id) {
         switch_to_screen(target_screen);
     }
+}
+
+// M2 heartbeat: run every 3s from loop (first run after 3s). If RTC diff outside 2-4s, go to screen 18.
+void check_m2_heartbeat(void) {
+    uint32_t present_m2_rtc = calc_timeofmonth();
+    if (past_m2_rtc != 0) {
+        uint32_t diff = present_m2_rtc - past_m2_rtc;
+        if (!first_heartbeat_compare_done) {
+            first_heartbeat_compare_done = true;  // Ignore first comparison (startup/default RTC)
+        } else {
+            if (diff < 2 || diff > 4) {
+                m2_connection_lost = true;
+                if (current_screen_id != SCREEN_M2_LOST) {
+                    switch_to_screen(SCREEN_M2_LOST);
+                }
+            } else {
+                m2_connection_lost = false;
+            }
+        }
+    }
+    past_m2_rtc = present_m2_rtc;
 }
 
 // ============================================================================
@@ -2129,7 +2191,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v3.4");
+    lv_label_set_text(title, "GCU 3kW Charger v3.5");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2299,7 +2361,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v3.4");
+    lv_label_set_text(title, "GCU 3kW Charger v3.5");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2958,72 +3020,6 @@ void create_screen_8(void) {
     Serial.println("[SCREEN] Screen 8 (Voltage Saturation) created successfully");
 }
 
-
-
-//screen 13 - CAN debug screen
-void create_screen_13(void) {
-    screen_13 = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(screen_13, lv_color_hex(0x90EE90), LV_PART_MAIN);  // Light green background
-    lv_obj_set_style_bg_opa(screen_13, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_opa(screen_13, LV_OPA_COVER, LV_PART_MAIN);
-
-    // v4.09: Screen NOT scrollable (fixed layout)
-    lv_obj_set_scroll_dir(screen_13, LV_DIR_NONE);  // No scrolling
-
-    // Title
-    lv_obj_t *title = lv_label_create(screen_13);
-    lv_label_set_text(title, "CAN Debug");
-    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
-
-    // Status label
-    lv_obj_t *status_label = lv_label_create(screen_13);
-    lv_label_set_text(status_label, "Received CAN Frames");
-    lv_obj_set_style_text_color(status_label, lv_color_hex(0x000000), LV_PART_MAIN);  // Black for visibility
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_26, LV_PART_MAIN);
-    lv_obj_align(status_label, LV_ALIGN_TOP_MID, 0, 60);
-
-    // CAN frames display area (scrollable container)
-    lv_obj_t* can_frames_container = lv_obj_create(screen_13);
-    lv_obj_set_size(can_frames_container, 990, 340);
-    lv_obj_set_pos(can_frames_container, 12, 240);  // Below table, aligned with table X position
-    lv_obj_set_style_bg_color(can_frames_container, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-    lv_obj_set_style_border_width(can_frames_container, 2, LV_PART_MAIN);
-    lv_obj_set_scroll_dir(can_frames_container, LV_DIR_VER);  // Vertical scroll
-
-    // CAN frame display label (will be updated dynamically)
-    screen13_can_frame_label = lv_label_create(can_frames_container);
-    lv_label_set_text(screen13_can_frame_label, "No CAN frames received yet...\nWaiting for CAN data...");
-    lv_obj_set_style_text_font(screen13_can_frame_label, &lv_font_montserrat_28, LV_PART_MAIN);  // Font 28 as requested
-    lv_obj_set_style_text_color(screen13_can_frame_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen13_can_frame_label, LV_ALIGN_TOP_LEFT, 10, 10);
-
-    // Initialize CAN debug lines
-    memset(can_debug_lines, 0, sizeof(can_debug_lines));
-    can_debug_current_line = 0;
-
-    // Back button (top right)
-    lv_obj_t *screen13_back_btn = lv_btn_create(screen_13);
-    lv_obj_set_size(screen13_back_btn, 100, 50);
-    lv_obj_align(screen13_back_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
-    lv_obj_set_style_bg_color(screen13_back_btn, lv_color_hex(0xFF4444), LV_PART_MAIN);  // Red back button
-    lv_obj_add_event_cb(screen13_back_btn, generic_back_button_event_handler, LV_EVENT_CLICKED, NULL);
-    lv_obj_t* back_label = lv_label_create(screen13_back_btn);
-    lv_label_set_text(back_label, "BACK");
-    lv_obj_set_style_text_font(back_label, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-    lv_obj_center(back_label);
-
-    // Add M2 state status box (same position as screen 1)
-    createM2StateBox(screen_13, "screen_13");
-
-    // Note: Screen loading is handled by switch_to_screen()
-    // lv_scr_load(screen_13); // Removed - handled by screen manager
-
-    Serial.println("[SCREEN] Screen 13 (CAN Debug) created successfully");
-}
-
 //screen 16 - Time debug screen
 void create_screen_16(void) {
     screen_16 = lv_obj_create(NULL);
@@ -3138,3 +3134,110 @@ void create_screen_17(void) {
     Serial.println("[SCREEN] Screen 17 (BLE Debug) created successfully");
 }
 */
+
+// Screen 13 - CAN debug screen (kept in order after screen 17)
+void create_screen_13(void) {
+    screen_13 = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen_13, lv_color_hex(0x90EE90), LV_PART_MAIN);  // Light green background
+    lv_obj_set_style_bg_opa(screen_13, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(screen_13, LV_OPA_COVER, LV_PART_MAIN);
+
+    // v4.09: Screen NOT scrollable (fixed layout)
+    lv_obj_set_scroll_dir(screen_13, LV_DIR_NONE);  // No scrolling
+
+    // Title
+    lv_obj_t *title = lv_label_create(screen_13);
+    lv_label_set_text(title, "CAN Debug");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+
+    // Status label
+    lv_obj_t *status_label = lv_label_create(screen_13);
+    lv_label_set_text(status_label, "Received CAN Frames");
+    lv_obj_set_style_text_color(status_label, lv_color_hex(0x000000), LV_PART_MAIN);  // Black for visibility
+    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(status_label, LV_ALIGN_TOP_MID, 0, 60);
+
+    // CAN frames display area (scrollable container)
+    lv_obj_t* can_frames_container = lv_obj_create(screen_13);
+    lv_obj_set_size(can_frames_container, 990, 340);
+    lv_obj_set_pos(can_frames_container, 12, 240);  // Below table, aligned with table X position
+    lv_obj_set_style_bg_color(can_frames_container, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_border_width(can_frames_container, 2, LV_PART_MAIN);
+    lv_obj_set_scroll_dir(can_frames_container, LV_DIR_VER);  // Vertical scroll
+
+    // CAN frame display label (will be updated dynamically)
+    screen13_can_frame_label = lv_label_create(can_frames_container);
+    lv_label_set_text(screen13_can_frame_label, "No CAN frames received yet...\nWaiting for CAN data...");
+    lv_obj_set_style_text_font(screen13_can_frame_label, &lv_font_montserrat_28, LV_PART_MAIN);  // Font 28 as requested
+    lv_obj_set_style_text_color(screen13_can_frame_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_align(screen13_can_frame_label, LV_ALIGN_TOP_LEFT, 10, 10);
+
+    // Initialize CAN debug lines
+    memset(can_debug_lines, 0, sizeof(can_debug_lines));
+    can_debug_current_line = 0;
+
+    // Back button (top right)
+    lv_obj_t *screen13_back_btn = lv_btn_create(screen_13);
+    lv_obj_set_size(screen13_back_btn, 100, 50);
+    lv_obj_align(screen13_back_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
+    lv_obj_set_style_bg_color(screen13_back_btn, lv_color_hex(0xFF4444), LV_PART_MAIN);  // Red back button
+    lv_obj_add_event_cb(screen13_back_btn, generic_back_button_event_handler, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* back_label = lv_label_create(screen13_back_btn);
+    lv_label_set_text(back_label, "BACK");
+    lv_obj_set_style_text_font(back_label, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_color(back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_center(back_label);
+
+    // Add M2 state status box (same position as screen 1)
+    createM2StateBox(screen_13, "screen_13");
+
+    // Note: Screen loading is handled by switch_to_screen()
+    // lv_scr_load(screen_13); // Removed - handled by screen manager
+
+    Serial.println("[SCREEN] Screen 13 (CAN Debug) created successfully");
+}
+
+// Screen 18 - M2 connection failed or lost (no buttons; restart only option)
+void create_screen_18(void) {
+    screen_18 = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(screen_18, lv_color_hex(0xFF6B6B), LV_PART_MAIN);  // Light red background
+    lv_obj_set_style_bg_opa(screen_18, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(screen_18, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_scroll_dir(screen_18, LV_DIR_NONE);
+
+    // Labels above table (table at y=110, ~100px tall)
+    lv_obj_t* title = lv_label_create(screen_18);
+    lv_label_set_text(title, "Connection failed or lost with M2");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+
+    lv_obj_t* msg = lv_label_create(screen_18);
+    lv_label_set_text(msg, "Contactor open, motor stopped.");
+    lv_obj_set_style_text_color(msg, lv_color_hex(0x8B0000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(msg, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 235);
+
+    lv_obj_t* msg2 = lv_label_create(screen_18);
+    lv_label_set_text(msg2, "Restart device after checking M2.");
+    lv_obj_set_style_text_color(msg2, lv_color_hex(0x8B0000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(msg2, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_align(msg2, LV_ALIGN_TOP_MID, 0, 280);
+
+    // Table same position as screen 1
+    if (data_table != nullptr) {
+        lv_obj_set_parent(data_table, screen_18);
+        lv_obj_set_pos(data_table, 12, 110);
+    }
+
+    // M2 RTC time label 20px below table (same position and style as screen 1)
+    screen18_rtc_time_label = lv_label_create(screen_18);
+    lv_label_set_text(screen18_rtc_time_label, "M2 rtc time: -- --");
+    lv_obj_set_style_text_font(screen18_rtc_time_label, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_set_style_text_color(screen18_rtc_time_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_align(screen18_rtc_time_label, LV_ALIGN_TOP_LEFT, 12, 330);  // 20px below table (110 + ~100 + 20)
+
+    Serial.println("[SCREEN] Screen 18 (M2 connection lost) created successfully");
+}

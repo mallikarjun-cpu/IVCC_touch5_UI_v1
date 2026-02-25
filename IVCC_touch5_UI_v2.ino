@@ -16,7 +16,10 @@ extern void update_screen_based_on_state();
 extern void update_table_values();
 extern void update_wifi_connection_status();
 extern void process_reboot_countdown();
+extern void check_m2_heartbeat(void);
 unsigned long last_table_update;
+static unsigned long last_heartbeat_check_ms = 0;
+static const unsigned long HEARTBEAT_CHECK_INTERVAL_MS = 3000;
 
 // Forward declarations for screen management variables
 extern bool battery_detected;
@@ -33,7 +36,7 @@ struct sensor_data {
 
 // Time data from M2 struct
 struct time_from_m2 {
-    uint16_t year = 2025;
+    uint16_t year = 2010;
     uint8_t month = 1;
     uint8_t date = 1;
     uint8_t day_of_week = 1; // 1=Sunday
@@ -120,10 +123,13 @@ void setup()
     delay(100); // Small delay for serial stabilization
 
     Serial.println("Creating UI");
+    /* Initialize SD card before screens so screen 1 can show entry number from charge_log */
+    initializeSDCard();
+
     /* Lock the mutex due to the LVGL APIs are not thread-safe */
     lvgl_port_lock(-1);
 
-    // * Create all UI screens at startup
+    // * Create all UI screens at startup (screen 1 uses getNextSerialNumber for Entry if SD ready)
     Serial.println("Initializing all screens...");
     initialize_all_screens();
     Serial.println("All screens initialized");
@@ -131,8 +137,6 @@ void setup()
     /* Release the mutex */
     lvgl_port_unlock();
     Serial.println("LVGL mutex unlocked");
-
-    initializeSDCard();
 
     // Initialize battery profiles after SD card setup
     initializeBatteryProfiles();
@@ -146,7 +150,7 @@ void setup()
     delay(200);
     send_contactor_control(CONTACTOR_OPEN);
     
-    Serial.println("End of setup, setup success! ------ v3.4------  \n -----");
+    Serial.println("End of setup, setup success! ------ v3.5------  \n -----");
 }
 
 void loop()
@@ -165,6 +169,12 @@ void loop()
     if (millis() - last_table_update >= 1000) {
         update_table_values();
         last_table_update = millis();
+    }
+
+    // M2 heartbeat: every 3s, first check after 3s from startup
+    if (millis() - last_heartbeat_check_ms >= HEARTBEAT_CHECK_INTERVAL_MS) {
+        check_m2_heartbeat();
+        last_heartbeat_check_ms = millis();
     }
 
     // Process BLE events (non-blocking)
