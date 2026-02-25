@@ -34,7 +34,6 @@ extern lv_obj_t* screen_7;
 extern lv_obj_t* screen_8;
 extern lv_obj_t* screen_13;
 extern lv_obj_t* screen_16;
-extern lv_obj_t* screen_17;
 extern lv_obj_t* screen_18;
 
 // Screen management enums and variables
@@ -49,7 +48,6 @@ typedef enum {
     SCREEN_VOLTAGE_SATURATION, // Screen 8 - Voltage saturation detected
     SCREEN_CAN_DEBUG = 13,     // Screen 13 - CAN debug screen
     SCREEN_TIME_DEBUG = 16,    // Screen 16 - Time debug screen
-    SCREEN_BLE_DEBUG = 17,     // Screen 17 - BLE debug screen
     SCREEN_M2_LOST = 18        // Screen 18 - M2 connection failed or lost
 } screen_id_t;
 
@@ -100,7 +98,6 @@ void create_screen_7(void); //screen 7 - Emergency stop
 void create_screen_8(void); //screen 8 - Voltage saturation detected
 void create_screen_13(void); //screen 13 - CAN debug screen
 void create_screen_16(void); //screen 16 - Time debug screen
-// void create_screen_17(void); //screen 17 - BLE debug screen - commented out, not required
 void create_screen_18(void); //screen 18 - M2 connection failed or lost
 
 // Screen management functions
@@ -116,10 +113,7 @@ void update_table_values(void);
 void update_m2_state_display(void);
 void update_can_debug_display(uint32_t id, uint8_t* data, uint8_t length);
 void update_time_debug_display(void); // Update time display on screen 16
-void update_ble_debug_display(void); // Update BLE display on screen 17
 void update_charging_control(void); // Charging control logic (CC/CV)
-void start_reboot_countdown(void); // Start 5-second countdown before reboot
-void process_reboot_countdown(void); // Process countdown and reboot if needed
 
 // M2 State Management Functions
 void updateM2State(m2_state_t new_state);

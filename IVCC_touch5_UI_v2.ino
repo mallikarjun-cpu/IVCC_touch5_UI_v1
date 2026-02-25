@@ -7,15 +7,11 @@
 #include "can_twai.h"
 #include "sd_logging.h"
 #include "rs485_vfdComs.h"
-#include "ble.h"
-#include "wifi_funcs.h"
 
 // Forward declarations for screen management functions
 extern void initialize_all_screens();
 extern void update_screen_based_on_state();
 extern void update_table_values();
-extern void update_wifi_connection_status();
-extern void process_reboot_countdown();
 extern void check_m2_heartbeat(void);
 unsigned long last_table_update;
 static unsigned long last_heartbeat_check_ms = 0;
@@ -45,9 +41,6 @@ struct time_from_m2 {
     uint8_t second = 0;
 } m2Time;
 
-// Global instances definitions
-BLEManager bleManager;
-
 using namespace esp_panel::drivers;
 using namespace esp_panel::board;
 
@@ -67,17 +60,6 @@ void setup()
     Serial.begin(115200);
     Serial.setTimeout(10); // Prevent serial blocking
     delay(100); // Small delay for serial stabilization
-
-    // Initialize WiFi preferences
-    // init_wifi_preferences();
-    
-    // Auto-connect to WiFi if credentials exist in preferences
-    // if (has_wifi_credentials()) {
-    //     Serial.println("[SETUP] WiFi credentials found in preferences, attempting connection...");
-    //     connect_to_wifi();
-    // } else {
-    //     Serial.println("[SETUP] No WiFi credentials in preferences, skipping auto-connect");
-    // }
 
     Serial.println("Initializing board, code is on github, changed again 2");
     board = new Board();
@@ -141,16 +123,11 @@ void setup()
     // Initialize battery profiles after SD card setup
     initializeBatteryProfiles();
 
-    // Initialize BLE after battery profiles
-    // Serial.println("Initializing BLE...");
-    // bleManager.init();
-    // Serial.println("BLE initialized successfully");
-
     //give 200ms delay and send a contactor open cmd over can bus.
     delay(200);
     send_contactor_control(CONTACTOR_OPEN);
     
-    Serial.println("End of setup, setup success! ------ v3.5------  \n -----");
+    Serial.println("End of setup, setup success! ------ v3.6------  \n -----");
 }
 
 void loop()
@@ -176,15 +153,6 @@ void loop()
         check_m2_heartbeat();
         last_heartbeat_check_ms = millis();
     }
-
-    // Process BLE events (non-blocking)
-    // bleManager.process();
-
-    // Process reboot countdown if active
-    // process_reboot_countdown();
-
-    // Handle OTA server requests if active
-    // handle_ota_requests();
 
     delay(100); // 10Hz loop frequency (100ms = 10 times per second)
 }
