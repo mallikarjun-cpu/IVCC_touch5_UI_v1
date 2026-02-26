@@ -61,11 +61,13 @@ static lv_obj_t* screen3_temp_label = nullptr;
 static lv_obj_t* screen4_temp_label = nullptr;
 static lv_obj_t* screen5_temp_label = nullptr;
 static lv_obj_t* screen8_battery_details_label = nullptr;
+static lv_obj_t* screen8_temp_label = nullptr;
 
 // Timer variables for charging screens
 static unsigned long charging_start_time = 0;  // When charging started (screen 3)
 static unsigned long cv_start_time = 0;        // When CV state started (screen 5)
 static unsigned long cc_state_duration_for_timer = 0;  // CC state duration for remaining time calc
+static unsigned long precharge_duration_for_timer = 0;  // Precharge duration (set at precharge->CC transition) for CV time calc
 static unsigned long final_charging_time_ms = 0;  // Final charging time when complete (stops updating)
 static unsigned long final_remaining_time_ms = 0;  // Final remaining time when complete (stops updating)
 static bool charging_complete = false;  // Flag to stop timer updates after completion
@@ -203,6 +205,11 @@ void initialize_all_screens() {
 
 // Switch to a specific screen
 void switch_to_screen(screen_id_t screen_id) {
+    // Once on screen 18 (M2 lost), no navigation away - restart only
+    if (current_screen_id == SCREEN_M2_LOST && screen_id != SCREEN_M2_LOST) {
+        return;
+    }
+
     lv_obj_t* target_screen = nullptr;
 
     // Determine which screen object to load
@@ -425,9 +432,9 @@ void update_charging_control() {
             // Calculate and store final remaining time (if in CV state)
             if (cv_start_time > 0 && cc_state_duration_for_timer > 0) {
                 unsigned long cv_elapsed = millis() - cv_start_time;
-                unsigned long cv_33_percent_time = cc_state_duration_for_timer / 3;  // 33% of CC time
-                unsigned long cv_30_min = 30 * 60 * 1000;  // 30 minutes in ms
-                unsigned long target_cv_time = (cv_33_percent_time < cv_30_min) ? cv_33_percent_time : cv_30_min;
+                unsigned long cv_target_base = precharge_duration_for_timer + (cc_state_duration_for_timer / 2);  // precharge + 50% CC
+                unsigned long cv_33_min = 33 * 60 * 1000;  // 33 minutes in ms
+                unsigned long target_cv_time = (cv_target_base < cv_33_min) ? cv_target_base : cv_33_min;
                 final_remaining_time_ms = (target_cv_time > cv_elapsed) ? (target_cv_time - cv_elapsed) : 0;
                 Serial.printf("[TEMP] Final remaining time: %lu ms (%.2f minutes)\n", 
                              final_remaining_time_ms, final_remaining_time_ms / 60000.0f);
@@ -601,6 +608,7 @@ void update_charging_control() {
             
             if (precharge_elapsed >= PRECHARGE_TIME_MS) {
                 Serial.println("[CHARGING] Precharge complete (x min elapsed), transitioning to CC mode");
+                precharge_duration_for_timer = precharge_elapsed;  // For CV time: precharge + 50% CC, max 33 min
                 current_app_state = STATE_CHARGING_CC; //update the fsm state to charging cc
                 cc_state_start_time = millis();  // Record CC state start time
                 Serial.println("[CHARGING] CC state timing started");
@@ -687,9 +695,9 @@ void update_charging_control() {
                     // Calculate and store final remaining time (if in CV state)
                     if (cv_start_time > 0 && cc_state_duration_for_timer > 0) {
                         unsigned long cv_elapsed = millis() - cv_start_time;
-                        unsigned long cv_33_percent_time = cc_state_duration_for_timer / 3;  // 33% of CC time
-                        unsigned long cv_30_min = 30 * 60 * 1000;  // 30 minutes in ms
-                        unsigned long target_cv_time = (cv_33_percent_time < cv_30_min) ? cv_33_percent_time : cv_30_min;
+                        unsigned long cv_target_base = precharge_duration_for_timer + (cc_state_duration_for_timer / 2);  // precharge + 50% CC
+                        unsigned long cv_33_min = 33 * 60 * 1000;  // 33 minutes in ms
+                        unsigned long target_cv_time = (cv_target_base < cv_33_min) ? cv_target_base : cv_33_min;
                         final_remaining_time_ms = (target_cv_time > cv_elapsed) ? (target_cv_time - cv_elapsed) : 0;
                         Serial.printf("[CHARGING_CC] Final remaining time: %lu ms (%.2f minutes)\n", 
                                      final_remaining_time_ms, final_remaining_time_ms / 60000.0f);
@@ -793,15 +801,15 @@ void update_charging_control() {
             current_frequency = cv_frequency;
             Serial.println("[CHARGING] CV frequency command sent immediately on transition");
             
-            // Calculate initial remaining time for immediate display
+// Calculate initial remaining time for immediate display
             if (cc_state_duration_for_timer > 0) {
-                unsigned long cv_33_percent_time = cc_state_duration_for_timer / 3;  // 33% of CC time
-                unsigned long cv_30_min = 30 * 60 * 1000;  // 30 minutes in ms
-                unsigned long target_cv_time = (cv_33_percent_time < cv_30_min) ? cv_33_percent_time : cv_30_min;
+                unsigned long cv_target_base = precharge_duration_for_timer + (cc_state_duration_for_timer / 2);  // precharge + 50% CC
+                unsigned long cv_33_min = 33 * 60 * 1000;  // 33 minutes in ms
+                unsigned long target_cv_time = (cv_target_base < cv_33_min) ? cv_target_base : cv_33_min;
                 unsigned long rem_seconds = target_cv_time / 1000;
                 unsigned long rem_minutes = rem_seconds / 60;
                 rem_seconds = rem_seconds % 60;
-                Serial.printf("[CHARGING] Initial remaining time: %02lu:%02lu (target CV time: %lu ms)\n", 
+                Serial.printf("[CHARGING] Initial remaining time: %02lu:%02lu (target CV time: %lu ms)\n",
                              rem_minutes, rem_seconds, target_cv_time);
             }
             // Screen switch will happen in determine_screen_from_state()
@@ -849,21 +857,23 @@ void update_charging_control() {
         current_frequency = new_frequency;
         
         // Termination condition: Check if charging is complete
-        // Complete if: 30 minutes in CV mode OR 33% of CC state time has elapsed
+        // Complete if: 33 minutes in CV mode OR (precharge time + 50% of CC time) has elapsed
         unsigned long current_time = millis();
         unsigned long cv_duration = 0;
         if (cv_state_start_time > 0) {
             cv_duration = current_time - cv_state_start_time;
         }
         
-        const unsigned long CV_COMPLETE_TIME_MS = 30 * 60 * 1000;  // 30 minutes in milliseconds
+        const unsigned long CV_COMPLETE_TIME_MS = 33 * 60 * 1000;  // 33 minutes in milliseconds
         bool cv_time_complete = (cv_duration >= CV_COMPLETE_TIME_MS);
         
-        // 33% of CC state time (if CC duration was recorded)
+        // Precharge + 50% of CC state time (if CC duration was recorded)
         bool cc_time_complete = false;
         if (cc_state_duration > 0) {
-            unsigned long cc_33_percent_time = cc_state_duration / 3;  // 33% = 1/3
-            cc_time_complete = (cv_duration >= cc_33_percent_time);
+            unsigned long cv_target_time = precharge_duration_for_timer + (cc_state_duration / 2);
+            unsigned long cv_33_min = 33 * 60 * 1000;
+            unsigned long cv_target_capped = (cv_target_time < cv_33_min) ? cv_target_time : cv_33_min;
+            cc_time_complete = (cv_duration >= cv_target_capped);
         }
         
         if (cv_time_complete || cc_time_complete) {
@@ -877,12 +887,12 @@ void update_charging_control() {
             
             // STEP 2: Now do other things (logging, calculations, etc.)
             if (cv_time_complete) {
-                Serial.printf("[CHARGING] CV mode duration: %lu ms (%.2f minutes) >= 30 minutes\n",
+                Serial.printf("[CHARGING] CV mode duration: %lu ms (%.2f minutes) >= 33 minutes\n",
                     cv_duration, cv_duration / 60000.0f);
             }
             if (cc_time_complete && cc_state_duration > 0) {
-                Serial.printf("[CHARGING] CV duration (%lu ms) >= 33%% of CC duration (%lu ms)\n",
-                    cv_duration, cc_state_duration);
+                Serial.printf("[CHARGING] CV duration (%lu ms) >= (precharge + 50%% CC) target\n",
+                    cv_duration);
             }
             
             // Store final charging time and remaining time before transitioning
@@ -895,9 +905,9 @@ void update_charging_control() {
                 // Calculate and store final remaining time
                 if (cv_start_time > 0 && cc_state_duration_for_timer > 0) {
                     unsigned long cv_elapsed = millis() - cv_start_time;
-                    unsigned long cv_33_percent_time = cc_state_duration_for_timer / 3;  // 33% of CC time
-                    unsigned long cv_30_min = 30 * 60 * 1000;  // 30 minutes in ms
-                    unsigned long target_cv_time = (cv_33_percent_time < cv_30_min) ? cv_33_percent_time : cv_30_min;
+                    unsigned long cv_target_base = precharge_duration_for_timer + (cc_state_duration_for_timer / 2);  // precharge + 50% CC
+                    unsigned long cv_33_min = 33 * 60 * 1000;  // 33 minutes in ms
+                    unsigned long target_cv_time = (cv_target_base < cv_33_min) ? cv_target_base : cv_33_min;
                     final_remaining_time_ms = (target_cv_time > cv_elapsed) ? (target_cv_time - cv_elapsed) : 0;
                     Serial.printf("[CHARGING] Final remaining time: %lu ms (%.2f minutes)\n", 
                                  final_remaining_time_ms, final_remaining_time_ms / 60000.0f);
@@ -1110,6 +1120,7 @@ void update_current_screen() {
                 charging_start_time = 0;
                 cv_start_time = 0;
                     cc_state_duration_for_timer = 0;
+                    precharge_duration_for_timer = 0;
                     pending_stop_command = false;
                     current_flow_start = false;
                     battery_detected = false;
@@ -1132,7 +1143,7 @@ void update_current_screen() {
         float temp1_celsius = sensorData.temp1 / 100.0f;
         float temp2_celsius = sensorData.temp2 / 100.0f;
         char temp_text[80];
-        sprintf(temp_text, "motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
+        sprintf(temp_text, "Motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
         lv_label_set_text(screen3_temp_label, temp_text);
     }
     if (screen4_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
@@ -1152,7 +1163,7 @@ void update_current_screen() {
         float temp1_celsius = sensorData.temp1 / 100.0f;
         float temp2_celsius = sensorData.temp2 / 100.0f;
         char temp_text[80];
-        sprintf(temp_text, "motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
+        sprintf(temp_text, "Motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
         lv_label_set_text(screen4_temp_label, temp_text);
     }
     // Update temperature label on screen 5
@@ -1160,8 +1171,16 @@ void update_current_screen() {
         float temp1_celsius = sensorData.temp1 / 100.0f;
         float temp2_celsius = sensorData.temp2 / 100.0f;
         char temp_text[80];
-        sprintf(temp_text, "motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
+        sprintf(temp_text, "Motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
         lv_label_set_text(screen5_temp_label, temp_text);
+    }
+    // Update temperature label on screen 8 (same format as screens 3,4,5)
+    if (screen8_temp_label != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
+        float temp1_celsius = sensorData.temp1 / 100.0f;
+        float temp2_celsius = sensorData.temp2 / 100.0f;
+        char temp_text[80];
+        sprintf(temp_text, "Motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
+        lv_label_set_text(screen8_temp_label, temp_text);
     }
     if (screen8_battery_details_label != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
         if (selected_battery_profile != nullptr) {
@@ -1279,9 +1298,9 @@ void update_current_screen() {
                 // Also update remaining time on screen 5 (CV state)
                 if (cv_start_time > 0 && cc_state_duration_for_timer > 0) {
                     unsigned long cv_elapsed = millis() - cv_start_time;
-                    unsigned long cv_33_percent_time = cc_state_duration_for_timer / 3;  // 33% of CC time
-                    unsigned long cv_30_min = 30 * 60 * 1000;  // 30 minutes in ms
-                    unsigned long target_cv_time = (cv_33_percent_time < cv_30_min) ? cv_33_percent_time : cv_30_min;
+                    unsigned long cv_target_base = precharge_duration_for_timer + (cc_state_duration_for_timer / 2);  // precharge + 50% CC
+                    unsigned long cv_33_min = 33 * 60 * 1000;  // 33 minutes in ms
+                    unsigned long target_cv_time = (cv_target_base < cv_33_min) ? cv_target_base : cv_33_min;
                     unsigned long remaining_time_ms = (target_cv_time > cv_elapsed) ? (target_cv_time - cv_elapsed) : 0;
                     
                     unsigned long rem_seconds = remaining_time_ms / 1000;
@@ -1346,6 +1365,10 @@ void update_current_screen() {
 
 // Determine which screen should be shown based on current state
 screen_id_t determine_screen_from_state() {
+    // Once on screen 18, stay there - only restart can leave (handled elsewhere)
+    if (current_screen_id == SCREEN_M2_LOST) {
+        return SCREEN_M2_LOST;
+    }
     // M2 connection lost overrides all other states
     if (m2_connection_lost) {
         return SCREEN_M2_LOST;
@@ -1473,14 +1496,15 @@ void displayMatchingBatteryProfiles(float detectedVoltage, lv_obj_t* container) 
         // Add event handler for profile selection
         lv_obj_add_event_cb(profile_btn, screen2_profile_selected_event_handler, LV_EVENT_CLICKED, (void*)profile);
 
-        // Create label with battery info
+        // Create label with battery info: "batteryName , displayName"
         lv_obj_t* profile_label = lv_label_create(profile_btn);
-        lv_label_set_text(profile_label, profile->getDisplayName().c_str());
-        lv_obj_set_style_text_font(profile_label, &lv_font_montserrat_20, LV_PART_MAIN);
+        String labelText = profile->getBatteryName() + " , " + profile->getDisplayName();
+        lv_label_set_text(profile_label, labelText.c_str());
+        lv_obj_set_style_text_font(profile_label, &lv_font_montserrat_22, LV_PART_MAIN);
         lv_obj_set_style_text_color(profile_label, lv_color_hex(0x000000), LV_PART_MAIN);
         lv_obj_center(profile_label);
 
-        Serial.printf("[BATTERY] Added matching profile at Y=%d: %s\n", button_y, profile->getDisplayName().c_str());
+        Serial.printf("[BATTERY] Added matching profile at Y=%d: %s\n", button_y, labelText.c_str());
 
         // Move to next button position
         button_y += button_height + button_spacing;
@@ -1772,6 +1796,7 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         cv_state_start_time = 0;  // Reset CV timing
         cc_state_duration = 0;    // Reset CC duration
         cc_state_duration_for_timer = 0;  // Reset for timer calculation
+        precharge_duration_for_timer = 0;
         
         // Reset voltage saturation tracking variables
         base_volt_satu_ref = 0.0f;
@@ -1870,9 +1895,9 @@ void emergency_stop_event_handler(lv_event_t * e) {
             // Calculate and store final remaining time (if in CV state)
             if (cv_start_time > 0 && cc_state_duration_for_timer > 0) {
                 unsigned long cv_elapsed = millis() - cv_start_time;
-                unsigned long cv_33_percent_time = cc_state_duration_for_timer / 3;  // 33% of CC time
-                unsigned long cv_30_min = 30 * 60 * 1000;  // 30 minutes in ms
-                unsigned long target_cv_time = (cv_33_percent_time < cv_30_min) ? cv_33_percent_time : cv_30_min;
+                unsigned long cv_target_base = precharge_duration_for_timer + (cc_state_duration_for_timer / 2);  // precharge + 50% CC
+                unsigned long cv_33_min = 33 * 60 * 1000;  // 33 minutes in ms
+                unsigned long target_cv_time = (cv_target_base < cv_33_min) ? cv_target_base : cv_33_min;
                 final_remaining_time_ms = (target_cv_time > cv_elapsed) ? (target_cv_time - cv_elapsed) : 0;
                 Serial.printf("[EMERGENCY] Final remaining time: %lu ms (%.2f minutes)\n", 
                              final_remaining_time_ms, final_remaining_time_ms / 60000.0f);
@@ -1937,6 +1962,7 @@ void home_button_event_handler(lv_event_t * e) {
             charging_start_time = 0;
             cv_start_time = 0;
             cc_state_duration_for_timer = 0;
+            precharge_duration_for_timer = 0;
             pending_stop_command = false;  // Reset stop command flag
             current_flow_start = false;
             
@@ -1969,16 +1995,16 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v3.8");
+    lv_label_set_text(title, "GCU 3kW Charger v3.9");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
 
     // Status label (battery detected, etc)
     status_label = lv_label_create(screen_1);
     lv_label_set_text(status_label, "Connect Battery");
     lv_obj_set_style_text_color(status_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red for visibility
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_28, LV_PART_MAIN);
     lv_obj_align(status_label, LV_ALIGN_TOP_MID, 0, 60);
 
     // Create or reposition shared data table
@@ -2110,7 +2136,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v3.8");
+    lv_label_set_text(title, "GCU 3kW Charger v3.9");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2173,9 +2199,9 @@ void create_screen_2(void) {
     // Confirmed battery label (below table, above buttons) - hidden by default
     screen2_confirmed_battery_label = lv_label_create(screen_2);
     lv_label_set_text(screen2_confirmed_battery_label, "");
-    lv_obj_set_style_text_font(screen2_confirmed_battery_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen2_confirmed_battery_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirmed_battery_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen2_confirmed_battery_label, LV_ALIGN_TOP_LEFT, 12, 210);  // Below table (table is at y=110, ~100px tall)
+    lv_obj_align(screen2_confirmed_battery_label, LV_ALIGN_TOP_LEFT, 12, 240);  // Below table (table is at y=110, ~100px tall)
     lv_obj_add_flag(screen2_confirmed_battery_label, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
 
     // Display 0V battery profiles by default during screen creation
@@ -2297,15 +2323,15 @@ void create_screen_3(void) {
     screen3_battery_details_label = lv_label_create(screen_3);
     lv_label_set_text(screen3_battery_details_label, "Selected Battery: --");
     lv_obj_set_style_text_color(screen3_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_text_font(screen3_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen3_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
+    lv_obj_set_style_text_font(screen3_battery_details_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(screen3_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);  // Moved up 30px (300 -> 270)
     
     // Temperature label (below battery details label)
     screen3_temp_label = lv_label_create(screen_3);
-    lv_label_set_text(screen3_temp_label, "motor temp : -- , Gcu temp : --");
+    lv_label_set_text(screen3_temp_label, "Motor temp : -- , Gcu temp : --");
     lv_obj_set_style_text_color(screen3_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_text_font(screen3_temp_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen3_temp_label, LV_ALIGN_TOP_LEFT, 12, 300);  // Below battery details label
+    lv_obj_set_style_text_font(screen3_temp_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(screen3_temp_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Below battery details label
     
     // Timer table (3x2) for screen 3 - below battery label, left aligned
     screen3_timer_table = lv_table_create(screen_3);
@@ -2328,16 +2354,16 @@ void create_screen_3(void) {
     lv_obj_clear_flag(screen3_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
 
-    // Emergency Stop button (bottom mid, large and visible)
+    // Emergency Stop button (bottom mid, large and visible, one-line label)
     lv_obj_t* screen3_emergency_stop_btn = lv_btn_create(screen_3);
-    lv_obj_set_size(screen3_emergency_stop_btn, 200, 80);
+    lv_obj_set_size(screen3_emergency_stop_btn, 360, 80);
     lv_obj_align(screen3_emergency_stop_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_obj_set_style_bg_color(screen3_emergency_stop_btn, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
     lv_obj_add_event_cb(screen3_emergency_stop_btn, emergency_stop_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_clear_flag(screen3_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen3_emergency_stop_label = lv_label_create(screen3_emergency_stop_btn);
-    lv_label_set_text(screen3_emergency_stop_label, "EMERGENCY\nSTOP");
-    lv_obj_set_style_text_font(screen3_emergency_stop_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_label_set_text(screen3_emergency_stop_label, "EMERGENCY STOP");
+    lv_obj_set_style_text_font(screen3_emergency_stop_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen3_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen3_emergency_stop_label);
 
@@ -2380,15 +2406,15 @@ void create_screen_4(void) {
     screen4_battery_details_label = lv_label_create(screen_4);
     lv_label_set_text(screen4_battery_details_label, "Selected Battery: --");
     lv_obj_set_style_text_color(screen4_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_text_font(screen4_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen4_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
+    lv_obj_set_style_text_font(screen4_battery_details_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(screen4_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);  // Moved up 30px (300 -> 270)
     
     // Temperature label (below battery details label)
     screen4_temp_label = lv_label_create(screen_4);
-    lv_label_set_text(screen4_temp_label, "motor temp : -- , Gcu temp : --");
+    lv_label_set_text(screen4_temp_label, "Motor temp : -- , Gcu temp : --");
     lv_obj_set_style_text_color(screen4_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_text_font(screen4_temp_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen4_temp_label, LV_ALIGN_TOP_LEFT, 12, 300);  // Below battery details label
+    lv_obj_set_style_text_font(screen4_temp_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(screen4_temp_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Below battery details label
     
     // Timer table (3x2) for screen 4 - below battery label, left aligned
     screen4_timer_table = lv_table_create(screen_4);
@@ -2411,16 +2437,16 @@ void create_screen_4(void) {
     lv_obj_clear_flag(screen4_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
 
-    // Emergency Stop button (bottom mid, large and visible)
+    // Emergency Stop button (bottom mid, large and visible, one-line label)
     lv_obj_t* screen4_emergency_stop_btn = lv_btn_create(screen_4);
-    lv_obj_set_size(screen4_emergency_stop_btn, 200, 80);
+    lv_obj_set_size(screen4_emergency_stop_btn, 360, 80);
     lv_obj_align(screen4_emergency_stop_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_obj_set_style_bg_color(screen4_emergency_stop_btn, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
     lv_obj_add_event_cb(screen4_emergency_stop_btn, emergency_stop_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_clear_flag(screen4_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen4_emergency_stop_label = lv_label_create(screen4_emergency_stop_btn);
-    lv_label_set_text(screen4_emergency_stop_label, "EMERGENCY\nSTOP");
-    lv_obj_set_style_text_font(screen4_emergency_stop_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_label_set_text(screen4_emergency_stop_label, "EMERGENCY STOP");
+    lv_obj_set_style_text_font(screen4_emergency_stop_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen4_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen4_emergency_stop_label);
 
@@ -2462,15 +2488,15 @@ void create_screen_5(void) {
     screen5_battery_details_label = lv_label_create(screen_5);
     lv_label_set_text(screen5_battery_details_label, "Selected Battery: --");
     lv_obj_set_style_text_color(screen5_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_text_font(screen5_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen5_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
+    lv_obj_set_style_text_font(screen5_battery_details_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(screen5_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);  // Moved up 30px (300 -> 270)
     
     // Temperature label (below battery details label)
     screen5_temp_label = lv_label_create(screen_5);
-    lv_label_set_text(screen5_temp_label, "motor temp : -- , Gcu temp : --");
+    lv_label_set_text(screen5_temp_label, "Motor temp : -- , Gcu temp : --");
     lv_obj_set_style_text_color(screen5_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_text_font(screen5_temp_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen5_temp_label, LV_ALIGN_TOP_LEFT, 12, 300);  // Below battery details label
+    lv_obj_set_style_text_font(screen5_temp_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(screen5_temp_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Below battery details label
     
     // Timer table (3x2) for screen 5 - shows total time, remaining time, and Ah, below battery label, left aligned
     screen5_timer_table = lv_table_create(screen_5);
@@ -2493,16 +2519,16 @@ void create_screen_5(void) {
     lv_obj_clear_flag(screen5_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
 
-    // Emergency Stop button (bottom mid, large and visible)
+    // Emergency Stop button (bottom mid, large and visible, one-line label)
     lv_obj_t* screen5_emergency_stop_btn = lv_btn_create(screen_5);
-    lv_obj_set_size(screen5_emergency_stop_btn, 200, 80);
+    lv_obj_set_size(screen5_emergency_stop_btn, 360, 80);
     lv_obj_align(screen5_emergency_stop_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_obj_set_style_bg_color(screen5_emergency_stop_btn, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
     lv_obj_add_event_cb(screen5_emergency_stop_btn, emergency_stop_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_clear_flag(screen5_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen5_emergency_stop_label = lv_label_create(screen5_emergency_stop_btn);
-    lv_label_set_text(screen5_emergency_stop_label, "EMERGENCY\nSTOP");
-    lv_obj_set_style_text_font(screen5_emergency_stop_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_label_set_text(screen5_emergency_stop_label, "EMERGENCY STOP");
+    lv_obj_set_style_text_font(screen5_emergency_stop_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen5_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen5_emergency_stop_label);
 
@@ -2570,7 +2596,7 @@ void create_screen_6(void) {
     lv_obj_clear_flag(screen6_home_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen6_home_label = lv_label_create(screen6_home_btn);
     lv_label_set_text(screen6_home_label, "Home");
-    lv_obj_set_style_text_font(screen6_home_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen6_home_label, &lv_font_montserrat_28, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen6_home_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen6_home_label);
 
@@ -2585,8 +2611,8 @@ void create_screen_6(void) {
     lv_obj_add_flag(screen6_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
     
     screen6_remove_battery_label = lv_label_create(screen6_remove_battery_popup);
-    lv_label_set_text(screen6_remove_battery_label, "Please remove the battery\nbefore returning to home screen");
-    lv_obj_set_style_text_font(screen6_remove_battery_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_label_set_text(screen6_remove_battery_label, "Please remove the battery \nbefore returning to home..");
+    lv_obj_set_style_text_font(screen6_remove_battery_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen6_remove_battery_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red text
     lv_obj_set_style_text_align(screen6_remove_battery_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_center(screen6_remove_battery_label);
@@ -2655,7 +2681,7 @@ void create_screen_7(void) {
     lv_obj_clear_flag(screen7_home_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen7_home_label = lv_label_create(screen7_home_btn);
     lv_label_set_text(screen7_home_label, "Home");
-    lv_obj_set_style_text_font(screen7_home_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen7_home_label, &lv_font_montserrat_28, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen7_home_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen7_home_label);
 
@@ -2670,8 +2696,8 @@ void create_screen_7(void) {
     lv_obj_add_flag(screen7_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
     
     screen7_remove_battery_label = lv_label_create(screen7_remove_battery_popup);
-    lv_label_set_text(screen7_remove_battery_label, "Please remove the battery\nbefore returning to home screen");
-    lv_obj_set_style_text_font(screen7_remove_battery_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_label_set_text(screen7_remove_battery_label, "Please remove the battery \nbefore returning to home..");
+    lv_obj_set_style_text_font(screen7_remove_battery_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen7_remove_battery_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red text
     lv_obj_set_style_text_align(screen7_remove_battery_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_center(screen7_remove_battery_label);
@@ -2710,14 +2736,21 @@ void create_screen_8(void) {
         lv_obj_set_pos(data_table, 12, 110);
     }
 
-    // Battery profile details label (below table, moved up 30px)
+    // Battery profile details label (below table, same position as screens 3,4,5)
     screen8_battery_details_label = lv_label_create(screen_8);
     lv_label_set_text(screen8_battery_details_label, "Selected Battery: --");
     lv_obj_set_style_text_color(screen8_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen8_battery_details_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_align(screen8_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
+    lv_obj_align(screen8_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);
     
-    // Timer table (3x2) for screen 8 - below battery label, left aligned
+    // Temperature label (below battery details, same position and size as screens 3,4,5)
+    screen8_temp_label = lv_label_create(screen_8);
+    lv_label_set_text(screen8_temp_label, "Motor temp : -- , Gcu temp : --");
+    lv_obj_set_style_text_color(screen8_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen8_temp_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(screen8_temp_label, LV_ALIGN_TOP_LEFT, 12, 270);
+    
+    // Timer table (3x2) for screen 8 - below temp label, same position as screens 3,4,5
     screen8_timer_table = lv_table_create(screen_8);
     lv_table_set_col_cnt(screen8_timer_table, 3);
     lv_table_set_row_cnt(screen8_timer_table, 2);
@@ -2734,20 +2767,20 @@ void create_screen_8(void) {
     lv_obj_set_style_border_color(screen8_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen8_timer_table, 3, LV_PART_ITEMS);  // Thick black border
     lv_obj_set_style_text_font(screen8_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
-    lv_obj_align(screen8_timer_table, LV_ALIGN_TOP_MID, 0, 320);  // Centered horizontally, same vertical position
+    lv_obj_align(screen8_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Same position as screens 3,4,5
     lv_obj_clear_flag(screen8_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
 
-    // Emergency Stop button (bottom mid, large and visible) - ALWAYS ENABLED
+    // Emergency Stop button (bottom mid, large and visible, one-line label) - ALWAYS ENABLED
     lv_obj_t* screen8_emergency_stop_btn = lv_btn_create(screen_8);
-    lv_obj_set_size(screen8_emergency_stop_btn, 200, 80);
+    lv_obj_set_size(screen8_emergency_stop_btn, 360, 80);
     lv_obj_align(screen8_emergency_stop_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_obj_set_style_bg_color(screen8_emergency_stop_btn, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
     lv_obj_add_event_cb(screen8_emergency_stop_btn, emergency_stop_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_clear_flag(screen8_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen8_emergency_stop_label = lv_label_create(screen8_emergency_stop_btn);
-    lv_label_set_text(screen8_emergency_stop_label, "EMERGENCY\nSTOP");
-    lv_obj_set_style_text_font(screen8_emergency_stop_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_label_set_text(screen8_emergency_stop_label, "EMERGENCY STOP");
+    lv_obj_set_style_text_font(screen8_emergency_stop_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen8_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen8_emergency_stop_label);
 
@@ -2870,14 +2903,14 @@ void create_screen_16(void) {
 // Screen 18 - M2 connection failed or lost (no buttons; restart only option)
 void create_screen_18(void) {
     screen_18 = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(screen_18, lv_color_hex(0xFF6B6B), LV_PART_MAIN);  // Light red background
+    lv_obj_set_style_bg_color(screen_18, lv_color_hex(0xFF6B61), LV_PART_MAIN);  // Light red background
     lv_obj_set_style_bg_opa(screen_18, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_opa(screen_18, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_scroll_dir(screen_18, LV_DIR_NONE);
 
     // Labels above table (table at y=110, ~100px tall)
     lv_obj_t* title = lv_label_create(screen_18);
-    lv_label_set_text(title, "Connection failed or lost with M2 V3.8");
+    lv_label_set_text(title, "Connection failed or lost with M2 V3.9"); //update ver number here too
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
@@ -2889,7 +2922,7 @@ void create_screen_18(void) {
     lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 235);
 
     lv_obj_t* msg2 = lv_label_create(screen_18);
-    lv_label_set_text(msg2, "Restart device after checking M2.");
+    lv_label_set_text(msg2, "Check with M2 and Restart device.");
     lv_obj_set_style_text_color(msg2, lv_color_hex(0x8B0000), LV_PART_MAIN);
     lv_obj_set_style_text_font(msg2, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_align(msg2, LV_ALIGN_TOP_MID, 0, 280);

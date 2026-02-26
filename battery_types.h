@@ -29,17 +29,22 @@ private:
     uint16_t ratedAh;           // Rated capacity in Ah (2-565)
     float cutoffVoltage;        // Upper cutoff voltage for CV mode
     float constCurrent;         // Target charging current in CC mode
-    String displayName;         // Display name for UI
+    String batteryName;         // User given name for UI; max 32 chars recommended
+    String displayName;        // Display name for UI (e.g. "24V LA 20Ah")
 
 public:
-    // Constructor
+    // Constructor; name optional — if blank/null, batteryName becomes "<un_named warning>"
     BatteryType(BatteryChemistry chem, uint16_t voltage, uint16_t ah,
-                float cutoff, float current)
+                float cutoff, float current, const char* name = nullptr)
         : chemistry(chem), ratedVoltage(voltage), ratedAh(ah),
           cutoffVoltage(cutoff), constCurrent(current) {
-        
+        if (name != nullptr && name[0] != '\0') {
+            batteryName = String(name);
+        } else {
+            batteryName = "<un_named warning>";
+        }
         // Generate display name
-        String chemStr = (chemistry == LITHIUM) ? "Li" : 
+        String chemStr = (chemistry == LITHIUM) ? "Li" :
                         (chemistry == LEAD_ACID) ? "LA" : "LFP";
         displayName = String(voltage) + "V " + chemStr + " " + String(ah) + "Ah";
     }
@@ -51,10 +56,17 @@ public:
     float getCutoffVoltage() const { return cutoffVoltage; }
     float getConstCurrent() const { return constCurrent; }
     String getDisplayName() const { return displayName; }
-    
+    String getBatteryName() const { return batteryName; }
+
     // Setters (for manual configuration)
     void setCutoffVoltage(float voltage) { cutoffVoltage = voltage; }
     void setConstCurrent(float current) { constCurrent = current; }
+    // Set battery name; blank/empty is stored as "<un_named warning>". Max 32 chars recommended.
+    void setBatteryName(const String& name) {
+        String t = name;
+        t.trim();
+        batteryName = (t.length() == 0) ? "<un_named warning>" : name;
+    }
 };
 
 // v4.60: Helper function to get battery chemistry name from profile
@@ -80,6 +92,11 @@ public:
     
     void addProfile(BatteryType* profile) {
         if (profileCount < MAX_PROFILES) {
+            String bn = profile->getBatteryName();
+            bn.trim();
+            if (bn.length() == 0) {
+                profile->setBatteryName("<un_named warning>");
+            }
             profiles[profileCount++] = profile;
         }
     }
