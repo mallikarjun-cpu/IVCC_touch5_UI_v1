@@ -158,143 +158,10 @@ static unsigned long last_voltage_saturation_check_time = 0;  // Last time volta
 static float voltage_saturation_detected_voltage = 0.0f;      // Voltage when saturation was detected
 static unsigned long voltage_saturation_cv_start_time = 0;   // CV start time for screen 8 state
 
-// ============================================================================
-// M2 State Management Globals
-// ============================================================================
-
-// M2 State Configuration Array (2 states only)
-static const m2_state_config_t m2_state_configs[] = {
-    {M2_STATE_STANDBY, "M2State1", lv_color_hex(0x0000FF), lv_color_hex(0x0000FF), "M2 State 1"},
-    {M2_STATE_INIT, "M2State2", lv_color_hex(0x00FF00), lv_color_hex(0x00FF00), "M2 State 2"},
-};
-
 // M2 heartbeat: RTC-based connection check (every 3s, first check after 3s from startup)
 static bool m2_connection_lost = false;
 static uint32_t past_m2_rtc = 0;
 static bool first_heartbeat_compare_done = false;  // Skip first comparison (startup/default RTC)
-
-// M2 Status Manager
-static m2_status_manager_t m2_manager = {
-    .state_box = nullptr,
-    .state_label = nullptr,
-    .current_state = M2_STATE_STANDBY,
-    .last_update_time = 0,
-    .is_connected = false
-};
-
-// Legacy M2 global variables (for backward compatibility)
-static lv_obj_t* m2_state_box = nullptr;
-static lv_obj_t* m2_state_label = nullptr;
-
-// M2 state box arrays for multiple screens (legacy support)
-#define MAX_SCREENS 13
-static lv_obj_t* m2_state_box_array[MAX_SCREENS] = {nullptr};
-static lv_obj_t* m2_state_label_array[MAX_SCREENS] = {nullptr};
-
-void createM2StateBox(lv_obj_t *parent_screen, const char* screen_name)
-{
-    // Get the current state configuration
-    const m2_state_config_t* config = getM2StateConfig(m2_manager.current_state);
-
-    // Container box (positioned right of M1 box: x=170)
-    lv_obj_t *box = lv_obj_create(parent_screen);
-    lv_obj_set_size(box, 160, 50);
-    lv_obj_align(box, LV_ALIGN_TOP_LEFT, 10, 10);  // Top left position
-    lv_obj_set_style_bg_color(box, config->bg_color, LV_PART_MAIN);
-    lv_obj_set_style_border_color(box, config->border_color, LV_PART_MAIN);
-    lv_obj_set_style_border_width(box, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(box, 5, LV_PART_MAIN);
-    lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);  // Disable scrolling
-
-    // Status label
-    lv_obj_t *label = lv_label_create(box);
-    lv_label_set_text(label, config->label_text);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(label, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
-    lv_obj_center(label);
-
-    // Update the manager
-    m2_manager.state_box = box;
-    m2_manager.state_label = label;
-    m2_manager.last_update_time = millis();
-
-    // Store in arrays for multi-screen support (map screen names to indices)
-    int screen_index = 0; // default
-    if (strcmp(screen_name, "screen_1") == 0) screen_index = 1;
-    else if (strcmp(screen_name, "screen_3") == 0) screen_index = 3;
-    else if (strcmp(screen_name, "screen_4") == 0) screen_index = 4;
-    else if (strcmp(screen_name, "screen_5") == 0) screen_index = 5;
-
-    if (screen_index >= 0 && screen_index < MAX_SCREENS) {
-        m2_state_box_array[screen_index] = box;
-        m2_state_label_array[screen_index] = label;
-    }
-
-    // Also store in legacy pointers (last one created)
-    m2_state_box = box;
-    m2_state_label = label;
-
-    Serial.printf("[CREATE M2 BOX] Screen %s (index %d): box=%p, label=%p, state=%d (%s)\n",
-                  screen_name, screen_index, box, label, m2_manager.current_state, config->label_text);
-}
-
-// Get M2 state configuration by state enum (only 2 states supported)
-const m2_state_config_t* getM2StateConfig(m2_state_t state) {
-    if (state == M2_STATE_STANDBY) {
-        return &m2_state_configs[0]; // M2State1
-    } else if (state == M2_STATE_INIT) {
-        return &m2_state_configs[1]; // M2State2
-    }
-    // Default to M2State1 if invalid state
-    return &m2_state_configs[0];
-}
-
-// Update M2 state and UI
-void updateM2State(m2_state_t new_state) {
-    if (new_state == m2_manager.current_state) {
-        return; // No change needed
-    }
-
-    // Validate state range (only allow 2 states for now)
-    if (new_state != M2_STATE_STANDBY && new_state != M2_STATE_INIT) {
-        Serial.printf("[M2 ERROR] Invalid state: %d (only M2State1 and M2State2 allowed)\n", new_state);
-        return;
-    }
-
-    // Update state
-    m2_manager.current_state = new_state;
-    m2_manager.last_update_time = millis();
-
-    // Update UI if objects exist
-    if (m2_manager.state_box && m2_manager.state_label) {
-        const m2_state_config_t* config = getM2StateConfig(new_state);
-
-        // Update box colors
-        lv_obj_set_style_bg_color(m2_manager.state_box, config->bg_color, LV_PART_MAIN);
-        lv_obj_set_style_border_color(m2_manager.state_box, config->border_color, LV_PART_MAIN);
-
-        // Update label text
-        lv_label_set_text(m2_manager.state_label, config->label_text);
-
-        Serial.printf("[M2 STATE UPDATE] State: %d (%s), Box: %p, Label: %p\n",
-                      new_state, config->label_text, m2_manager.state_box, m2_manager.state_label);
-    } else {
-        Serial.printf("[M2 STATE UPDATE] State changed to %d but UI objects not initialized\n", new_state);
-    }
-}
-
-// Update M2 connection status
-void updateM2ConnectionStatus(bool connected) {
-    m2_manager.is_connected = connected;
-    m2_manager.last_update_time = millis();
-
-    if (!connected) {
-        // Force disconnected state when connection is lost
-        updateM2State(M2_STATE_DISCONNECTED);
-    }
-
-    Serial.printf("[M2 CONNECTION] Status: %s\n", connected ? "CONNECTED" : "DISCONNECTED");
-}
 
 // Forward declarations for battery profile functions
 void displayMatchingBatteryProfiles(float detectedVoltage, lv_obj_t* container);
@@ -392,6 +259,11 @@ void switch_to_screen(screen_id_t screen_id) {
             send_contactor_control(CONTACTOR_OPEN);
             Serial.println("[M2] Contactor open sent");
         }
+
+        // Lock LVGL for entire switch (move table + load screen). Prevents first-boot overlay
+        // where screen 18 labels drew over screen 1 background/table when update_m2_state_display was removed.
+        lvgl_port_lock(-1);
+
         // Update current screen tracking
         current_screen_id = screen_id;
 
@@ -446,9 +318,6 @@ void switch_to_screen(screen_id_t screen_id) {
             }
         }
 
-        // Update M2 state box for current screen
-        update_m2_state_display();
-        
         // Set battery details label once on entry to screens 3, 4, 5 (won't change during charge)
         if (screen_id == SCREEN_CHARGING_STARTED && screen3_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
@@ -489,6 +358,10 @@ void switch_to_screen(screen_id_t screen_id) {
 
         // Load the screen
         lv_scr_load(target_screen);
+        // Force full redraw of new screen so previous screen does not linger (first USB boot fix).
+        lv_obj_invalidate(target_screen);
+
+        lvgl_port_unlock();
 
         Serial.printf("[SCREEN] Switched to screen %d\n", screen_id);
     } else {
@@ -496,8 +369,13 @@ void switch_to_screen(screen_id_t screen_id) {
     }
 }
 
+
+
+
+
+
 // ============================================================================
-// Charging Control Function
+// Charging Control Function start
 // ============================================================================
 void update_charging_control() {
     // Only run in charging states
@@ -595,10 +473,12 @@ void update_charging_control() {
     uint16_t new_frequency = current_frequency;
     
 // State-specific charging logic
+    // ============================================================================
     // [1] STATE_CHARGING_START: Maintain PRECHARGE_AMPS (2A) for PRECHARGE_TIME (3 minutes), then transition to CC
+    // ============================================================================
     if (current_app_state == STATE_CHARGING_START) {
-        // Set current_flow_start once current >= 1.1 A (allows 0 A before that; 1.0 A below = disconnect after flow)
-        if (safe_actual_current >= 1.1f) {
+        // Set current_flow_start once current >= 1.5 A (allows 0 A before that; 1.0 A below = disconnect after flow)
+        if (safe_actual_current >= 1.5f) {
             current_flow_start = true;
         }
         // Battery disconnected: current had flowed but now dropped below 1.0 A
@@ -627,8 +507,9 @@ void update_charging_control() {
         // Step 1 safety: no current flow within timeout, or RPM over limit
         unsigned long step1_elapsed = (charging_start_time > 0) ? (millis() - charging_start_time) : 0;
         float step1_rpm = VFD_FREQ_TO_RPM(current_frequency / 100.0f);
+
         if ((step1_elapsed >= PRECHARGE_CURRENT_FLOW_TIMEOUT_MS && !current_flow_start) ||
-            (step1_rpm > (float)PRECHARGE_RPM_LIMIT)) {
+        ((step1_rpm > (float)PRECHARGE_RPM_LIMIT) && !current_flow_start)) {
             Serial.println("[CHARGING] Volt or current error (no flow in time or RPM > limit), emergency stop");
             send_contactor_control(CONTACTOR_OPEN);
             delay(10);
@@ -653,7 +534,7 @@ void update_charging_control() {
         // Use CC logic to maintain current at PRECHARGE_AMPS (2A) - like CC but fixed at precharge level
         uint16_t precharge_target_0_01A = (uint16_t)(PRECHARGE_AMPS * 100);  // Convert 2A to 0.01A units
         new_frequency = rs485_CalcFrequencyFor_CC(current_frequency, precharge_target_0_01A, actual_current_0_01A);
-        
+ 
         // Debug logging
         #if ACTUAL_TARGET_CC_CV_debug
         int32_t current_error = (int32_t)actual_current_0_01A - (int32_t)precharge_target_0_01A;
@@ -719,7 +600,7 @@ void update_charging_control() {
             }
             
             if (precharge_elapsed >= PRECHARGE_TIME_MS) {
-                Serial.println("[CHARGING] Precharge complete (3 min elapsed), transitioning to CC mode");
+                Serial.println("[CHARGING] Precharge complete (x min elapsed), transitioning to CC mode");
                 current_app_state = STATE_CHARGING_CC; //update the fsm state to charging cc
                 cc_state_start_time = millis();  // Record CC state start time
                 Serial.println("[CHARGING] CC state timing started");
@@ -735,7 +616,9 @@ void update_charging_control() {
         }
     }
 
+    // ============================================================================
     // [2] STATE_CHARGING_CC: Constant Current mode until target voltage reached
+    // ============================================================================
     else if (current_app_state == STATE_CHARGING_CC) {
         // Battery disconnected in step 2
         if (current_flow_start && safe_actual_current < 1.0f) {
@@ -1141,6 +1024,14 @@ void update_charging_control() {
         }
     }
 }
+// ============================================================================
+//main charging control funciton end 
+// ============================================================================
+
+
+
+
+
 
 // Update current screen content (screen-specific updates)
 void update_current_screen() {
@@ -1643,22 +1534,6 @@ void update_table_values() {
     lvgl_port_unlock();
 }
 
-// Update M2 state display on current screen
-void update_m2_state_display() {
-    lvgl_port_lock(-1);
-
-    // Update M2 state box on current screen
-    if (m2_manager.state_box && m2_manager.state_label) {
-        const m2_state_config_t* config = getM2StateConfig(m2_manager.current_state);
-
-        lv_obj_set_style_bg_color(m2_manager.state_box, config->bg_color, LV_PART_MAIN);
-        lv_obj_set_style_border_color(m2_manager.state_box, config->border_color, LV_PART_MAIN);
-        lv_label_set_text(m2_manager.state_label, config->label_text);
-    }
-
-    lvgl_port_unlock();
-}
-
 // Update accumulated Ah based on current flow
 void update_accumulated_ah(void) {
     // Only run in charging states
@@ -2094,7 +1969,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v3.7");
+    lv_label_set_text(title, "GCU 3kW Charger v3.8");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2123,11 +1998,11 @@ void create_screen_1()
         lv_table_set_col_width(data_table, 4, 198);  // Entry
 
         // Headers (Row 0)
-        lv_table_set_cell_value(data_table, 0, 0, "Volt");
-        lv_table_set_cell_value(data_table, 0, 1, "Curr");
-        lv_table_set_cell_value(data_table, 0, 2, "R Temp3");
-        lv_table_set_cell_value(data_table, 0, 3, "Rpm");
-        lv_table_set_cell_value(data_table, 0, 4, "Entry");
+        lv_table_set_cell_value(data_table, 0, 0, "Voltage");
+        lv_table_set_cell_value(data_table, 0, 1, "Current");
+        lv_table_set_cell_value(data_table, 0, 2, "Temp");
+        lv_table_set_cell_value(data_table, 0, 3, "RPM");
+        lv_table_set_cell_value(data_table, 0, 4, "LOG_num");
 
         // Values (Row 1)
         lv_table_set_cell_value(data_table, 1, 0, "--");
@@ -2171,9 +2046,10 @@ void create_screen_1()
     // M2 RTC Time label (20px below table)
     screen1_rtc_time_label = lv_label_create(screen_1);
     lv_label_set_text(screen1_rtc_time_label, "M2 rtc time: -- --");
-    lv_obj_set_style_text_font(screen1_rtc_time_label, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen1_rtc_time_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen1_rtc_time_label, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
-    lv_obj_align(screen1_rtc_time_label, LV_ALIGN_TOP_LEFT, 12, 230);  // 20px below table (110 + ~100 table height + 20)
+    //lv_obj_align(screen1_rtc_time_label, LV_ALIGN_TOP_LEFT, 12, 230);  // 20px below table (110 + ~100 table height + 20)
+    lv_obj_align(screen1_rtc_time_label, LV_ALIGN_TOP_MID, 0, 280);  // screen center below table
 
     // Battery profiles not applicable for screen 1 - removed container creation
 
@@ -2215,9 +2091,6 @@ void create_screen_1()
     lv_obj_center(screen1_time_debug_label);
 #endif // CAN_RTC_DEBUG
 
-    // v4.50: Add M2 state status box (top-left corner) - Screen 1
-    createM2StateBox(screen_1, "screen_1");
-
     // Note: Screen loading is handled by switch_to_screen()
     // lv_scr_load(screen_1); // Removed - handled by screen manager
     Serial.println("[SCREEN] Screen 1 created successfully");
@@ -2237,7 +2110,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v3.7");
+    lv_label_set_text(title, "GCU 3kW Charger v3.8");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2296,8 +2169,6 @@ void create_screen_2(void) {
     lv_obj_set_style_text_font(screen2_start_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_center(screen2_start_label);
 
-    // Add M2 state status box - screen 2
-    createM2StateBox(screen_2, "screen_2");
 
     // Confirmed battery label (below table, above buttons) - hidden by default
     screen2_confirmed_battery_label = lv_label_create(screen_2);
@@ -2456,8 +2327,6 @@ void create_screen_3(void) {
     lv_obj_align(screen3_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen3_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Add M2 state status box - screen 3
-    createM2StateBox(screen_3, "screen_3");
 
     // Emergency Stop button (bottom mid, large and visible)
     lv_obj_t* screen3_emergency_stop_btn = lv_btn_create(screen_3);
@@ -2541,8 +2410,6 @@ void create_screen_4(void) {
     lv_obj_align(screen4_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen4_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Add M2 state status box - screen 4
-    createM2StateBox(screen_4, "screen_4");
 
     // Emergency Stop button (bottom mid, large and visible)
     lv_obj_t* screen4_emergency_stop_btn = lv_btn_create(screen_4);
@@ -2625,8 +2492,6 @@ void create_screen_5(void) {
     lv_obj_align(screen5_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen5_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Add M2 state status box - screen 5
-    createM2StateBox(screen_5, "screen_5");
 
     // Emergency Stop button (bottom mid, large and visible)
     lv_obj_t* screen5_emergency_stop_btn = lv_btn_create(screen_5);
@@ -2695,8 +2560,6 @@ void create_screen_6(void) {
     lv_obj_align(screen6_timer_table, LV_ALIGN_TOP_MID, 0, 270);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen6_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Add M2 state status box - screen 6
-    createM2StateBox(screen_6, "screen_6");
 
     // Home button (bottom mid)
     lv_obj_t* screen6_home_btn = lv_btn_create(screen_6);
@@ -2782,8 +2645,6 @@ void create_screen_7(void) {
     lv_obj_align(screen7_timer_table, LV_ALIGN_TOP_MID, 0, 270);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen7_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Add M2 state status box - screen 7
-    createM2StateBox(screen_7, "screen_7");
 
     // Home button (bottom mid)
     lv_obj_t* screen7_home_btn = lv_btn_create(screen_7);
@@ -2876,8 +2737,6 @@ void create_screen_8(void) {
     lv_obj_align(screen8_timer_table, LV_ALIGN_TOP_MID, 0, 320);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen8_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Add M2 state status box - screen 8
-    createM2StateBox(screen_8, "screen_8");
 
     // Emergency Stop button (bottom mid, large and visible) - ALWAYS ENABLED
     lv_obj_t* screen8_emergency_stop_btn = lv_btn_create(screen_8);
@@ -2951,8 +2810,6 @@ void create_screen_13(void) {
     lv_obj_set_style_text_color(back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_center(back_label);
 
-    // Add M2 state status box (same position as screen 1)
-    createM2StateBox(screen_13, "screen_13");
 
     // Note: Screen loading is handled by switch_to_screen()
     // lv_scr_load(screen_13); // Removed - handled by screen manager
@@ -3003,8 +2860,6 @@ void create_screen_16(void) {
     lv_obj_set_style_text_color(back_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
     lv_obj_center(back_label);
 
-    // Add M2 state status box (same position as screen 1)
-    createM2StateBox(screen_16, "screen_16");
 
     // Note: Screen loading is handled by switch_to_screen()
     // lv_scr_load(screen_16); // Removed - handled by screen manager
@@ -3022,21 +2877,21 @@ void create_screen_18(void) {
 
     // Labels above table (table at y=110, ~100px tall)
     lv_obj_t* title = lv_label_create(screen_18);
-    lv_label_set_text(title, "Connection failed or lost with M2");
+    lv_label_set_text(title, "Connection failed or lost with M2 V3.8");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
 
     lv_obj_t* msg = lv_label_create(screen_18);
     lv_label_set_text(msg, "Contactor open, motor stopped.");
     lv_obj_set_style_text_color(msg, lv_color_hex(0x8B0000), LV_PART_MAIN);
-    lv_obj_set_style_text_font(msg, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_set_style_text_font(msg, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 235);
 
     lv_obj_t* msg2 = lv_label_create(screen_18);
     lv_label_set_text(msg2, "Restart device after checking M2.");
     lv_obj_set_style_text_color(msg2, lv_color_hex(0x8B0000), LV_PART_MAIN);
-    lv_obj_set_style_text_font(msg2, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_set_style_text_font(msg2, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_align(msg2, LV_ALIGN_TOP_MID, 0, 280);
 
     // Table same position as screen 1
@@ -3048,9 +2903,10 @@ void create_screen_18(void) {
     // M2 RTC time label 20px below table (same position and style as screen 1)
     screen18_rtc_time_label = lv_label_create(screen_18);
     lv_label_set_text(screen18_rtc_time_label, "M2 rtc time: -- --");
-    lv_obj_set_style_text_font(screen18_rtc_time_label, &lv_font_montserrat_28, LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen18_rtc_time_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen18_rtc_time_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen18_rtc_time_label, LV_ALIGN_TOP_LEFT, 12, 330);  // 20px below table (110 + ~100 + 20)
+    //lv_obj_align(screen18_rtc_time_label, LV_ALIGN_TOP_LEFT, 12, 330);  // 20px below table (110 + ~100 + 20)
+    lv_obj_align(screen18_rtc_time_label, LV_ALIGN_TOP_MID, 0, 350);  // screen center below table
 
     Serial.println("[SCREEN] Screen 18 (M2 connection lost) created successfully");
 }

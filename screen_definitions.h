@@ -82,15 +82,6 @@ extern screen_id_t current_screen_id;
 extern app_state_t current_app_state;
 extern charge_stop_reason_t charge_stop_reason;
 
-// M2 Status Manager Struct
-typedef struct {
-    lv_obj_t* state_box;
-    lv_obj_t* state_label;
-    m2_state_t current_state;
-    uint32_t last_update_time;
-    bool is_connected;
-} m2_status_manager_t;
-
 // Function declarations for creating custom UI screens
 void create_screen_1(void); //screen 1 - default screen
 void create_screen_2(void); //screen 2 - battery detected, charge ready page
@@ -114,14 +105,8 @@ void check_m2_heartbeat(void);  // Call every 3s from loop; first run after 3s f
 
 // Table and UI update functions
 void update_table_values(void);
-void update_m2_state_display(void);
 void update_can_debug_display(uint32_t id, uint8_t* data, uint8_t length);
 void update_time_debug_display(void); // Update time display on screen 16
 void update_charging_control(void); // Charging control logic (CC/CV)
-
-// M2 State Management Functions
-void updateM2State(m2_state_t new_state);
-void updateM2ConnectionStatus(bool connected);
-const m2_state_config_t* getM2StateConfig(m2_state_t state);
 
 #endif // SCREEN_DEFINITIONS_H

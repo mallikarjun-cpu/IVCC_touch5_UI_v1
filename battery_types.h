@@ -159,31 +159,4 @@ extern BatteryProfileManager batteryProfiles;
 
 void initializeBatteryProfiles();
 
-// ============================================================================
-// M2 Sensor Node State Management
-// ============================================================================
-
-// M2 State Enum (10 states as requested)
-typedef enum {
-    M2_STATE_STANDBY = 0,      // Default standby state
-    M2_STATE_INIT,             // Initializing
-    // M2_STATE_READY,            // Ready for operation - commented out, not required
-    // M2_STATE_CHARGING,         // Charging active - commented out, not required
-    // M2_STATE_FULL,             // Battery full - commented out, not required
-    // M2_STATE_ERROR,            // Error state - commented out, not required
-    M2_STATE_DISCONNECTED,     // Disconnected
-    // M2_STATE_FAULT,            // Fault detected - commented out, not required
-    // M2_STATE_CALIBRATING,      // Calibrating - commented out, not required
-    // M2_STATE_MAINTENANCE       // Maintenance mode - commented out, not required
-} m2_state_t;
-
-// M2 State Configuration Struct
-typedef struct {
-    m2_state_t state;
-    const char* label_text;
-    lv_color_t bg_color;
-    lv_color_t border_color;
-    const char* description;
-} m2_state_config_t;
-
 #endif // BATTERY_TYPES_H
