@@ -92,7 +92,9 @@ static lv_obj_t* screen3_timer_table = nullptr;
 static lv_obj_t* screen4_timer_table = nullptr;
 static lv_obj_t* screen5_timer_table = nullptr;
 static lv_obj_t* screen6_timer_table = nullptr;
+static lv_obj_t* screen6_battery_details_label = nullptr;
 static lv_obj_t* screen7_timer_table = nullptr;
+static lv_obj_t* screen7_battery_details_label = nullptr;
 static lv_obj_t* screen8_timer_table = nullptr;
 
 // screen 2 confirmation popup
@@ -328,8 +330,9 @@ void switch_to_screen(screen_id_t screen_id) {
         // Set battery details label once on entry to screens 3, 4, 5 (won't change during charge)
         if (screen_id == SCREEN_CHARGING_STARTED && screen3_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
-                char details_text[100];
-                sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)",
+                char details_text[180];
+                sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getBatteryName().c_str(),
                         selected_battery_profile->getDisplayName().c_str(),
                         selected_battery_profile->getCutoffVoltage(),
                         selected_battery_profile->getConstCurrent());
@@ -340,8 +343,9 @@ void switch_to_screen(screen_id_t screen_id) {
         }
         if (screen_id == SCREEN_CHARGING_CC && screen4_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
-                char details_text[100];
-                sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)",
+                char details_text[180];
+                sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getBatteryName().c_str(),
                         selected_battery_profile->getDisplayName().c_str(),
                         selected_battery_profile->getCutoffVoltage(),
                         selected_battery_profile->getConstCurrent());
@@ -352,14 +356,42 @@ void switch_to_screen(screen_id_t screen_id) {
         }
         if (screen_id == SCREEN_CHARGING_CV && screen5_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
-                char details_text[100];
-                sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)",
+                char details_text[180];
+                sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getBatteryName().c_str(),
                         selected_battery_profile->getDisplayName().c_str(),
                         selected_battery_profile->getCutoffVoltage(),
                         selected_battery_profile->getConstCurrent());
                 lv_label_set_text(screen5_battery_details_label, details_text);
             } else {
                 lv_label_set_text(screen5_battery_details_label, "Selected Battery: None");
+            }
+        }
+        // Set battery details label on entry to screens 6, 7
+        if (screen_id == SCREEN_CHARGING_COMPLETE && screen6_battery_details_label != nullptr) {
+            if (selected_battery_profile != nullptr) {
+                char details_text[180];
+                sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayName().c_str(),
+                        selected_battery_profile->getCutoffVoltage(),
+                        selected_battery_profile->getConstCurrent());
+                lv_label_set_text(screen6_battery_details_label, details_text);
+            } else {
+                lv_label_set_text(screen6_battery_details_label, "Selected Battery: None");
+            }
+        }
+        if (screen_id == SCREEN_EMERGENCY_STOP && screen7_battery_details_label != nullptr) {
+            if (selected_battery_profile != nullptr) {
+                char details_text[180];
+                sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayName().c_str(),
+                        selected_battery_profile->getCutoffVoltage(),
+                        selected_battery_profile->getConstCurrent());
+                lv_label_set_text(screen7_battery_details_label, details_text);
+            } else {
+                lv_label_set_text(screen7_battery_details_label, "Selected Battery: None");
             }
         }
 
@@ -1148,8 +1180,9 @@ void update_current_screen() {
     }
     if (screen4_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
         if (selected_battery_profile != nullptr) {
-            char details_text[100];
-            sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)",
+            char details_text[180];
+            sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
+                    selected_battery_profile->getBatteryName().c_str(),
                     selected_battery_profile->getDisplayName().c_str(),
                     selected_battery_profile->getCutoffVoltage(),
                     selected_battery_profile->getConstCurrent());
@@ -1184,8 +1217,9 @@ void update_current_screen() {
     }
     if (screen8_battery_details_label != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
         if (selected_battery_profile != nullptr) {
-            char details_text[150];
-            sprintf(details_text, "Selected Battery: %s (TV: %.1f V, TC: %.1f A)\nSaturation Voltage: %.2f V",
+            char details_text[220];
+            sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)\nSaturation Voltage: %.2f V",
+                    selected_battery_profile->getBatteryName().c_str(),
                     selected_battery_profile->getDisplayName().c_str(),
                     selected_battery_profile->getCutoffVoltage(),
                     selected_battery_profile->getConstCurrent(),
@@ -1500,7 +1534,7 @@ void displayMatchingBatteryProfiles(float detectedVoltage, lv_obj_t* container) 
         lv_obj_t* profile_label = lv_label_create(profile_btn);
         String labelText = profile->getBatteryName() + " , " + profile->getDisplayName();
         lv_label_set_text(profile_label, labelText.c_str());
-        lv_obj_set_style_text_font(profile_label, &lv_font_montserrat_22, LV_PART_MAIN);
+        lv_obj_set_style_text_font(profile_label, &lv_font_montserrat_24, LV_PART_MAIN);
         lv_obj_set_style_text_color(profile_label, lv_color_hex(0x000000), LV_PART_MAIN);
         lv_obj_center(profile_label);
 
@@ -1720,10 +1754,10 @@ void screen2_confirm_agree_event_handler(lv_event_t * e) {
         
         // Show confirmed battery info below the table
         if (screen2_confirmed_battery_label != nullptr && selected_battery_profile != nullptr) {
-            char confirmed_str[150];
-            sprintf(confirmed_str, "Confirmed Battery: %d V, %d Ah (TV: %.1f V, TC: %.1f A)",
-                    selected_battery_profile->getRatedVoltage(),
-                    selected_battery_profile->getRatedAh(),
+            char confirmed_str[200];
+            sprintf(confirmed_str, "Confirmed: %s , %s (TV: %.1f V, TC: %.1f A)",
+                    selected_battery_profile->getBatteryName().c_str(),
+                    selected_battery_profile->getDisplayName().c_str(),
                     selected_battery_profile->getCutoffVoltage(),
                     selected_battery_profile->getConstCurrent());
             lv_label_set_text(screen2_confirmed_battery_label, confirmed_str);
@@ -1753,16 +1787,17 @@ void screen2_profile_selected_event_handler(lv_event_t * e) {
             // Store selected profile globally for screen 3 display
             selected_battery_profile = selected_profile;
 
-            // Update confirmation popup with selected profile details (TV and TC)
-            // Use sprintf to properly format float values
+            // Update confirmation popup: displayName then batteryName (font 28), then TV/TC
             char tv_str[50];
             char tc_str[50];
-            char battery_info_str[100];
-            
-            sprintf(tv_str, "TV: %.1f V", selected_profile->getCutoffVoltage());
-            sprintf(tc_str, "TC: %.1f A", selected_profile->getConstCurrent());
-            sprintf(battery_info_str, "%d V, %d Ah", selected_profile->getRatedVoltage(), selected_profile->getRatedAh());
-            
+            char battery_info_str[120];
+            snprintf(battery_info_str, sizeof(battery_info_str), "%s\n%s",
+                    selected_profile->getDisplayName().c_str(),
+                    selected_profile->getBatteryName().c_str());
+
+            sprintf(tv_str, "Target Voltage: %.1f V", selected_profile->getCutoffVoltage());
+            sprintf(tc_str, "Target Current: %.1f A", selected_profile->getConstCurrent());
+
             lv_label_set_text(screen2_confirm_battery_info_label, battery_info_str);
             lv_label_set_text(screen2_confirm_voltage_label, tv_str);
             lv_label_set_text(screen2_confirm_capacity_label, tc_str);
@@ -1995,10 +2030,10 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v3.9");
+    lv_label_set_text(title, "GCU 3kW Charger v4.0");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);  // Use available font
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);  // Use available font
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
 
     // Status label (battery detected, etc)
     status_label = lv_label_create(screen_1);
@@ -2136,16 +2171,16 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v3.9");
+    lv_label_set_text(title, "GCU 3kW Charger v4.0");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);  // Use available font
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
 
     // Status label (battery detected, charge ready)
     lv_obj_t *status_label_2 = lv_label_create(screen_2);
     lv_label_set_text(status_label_2, "Battery detected - charge ready");
     lv_obj_set_style_text_color(status_label_2, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red for visibility
-    lv_obj_set_style_text_font(status_label_2, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_set_style_text_font(status_label_2, &lv_font_montserrat_28, LV_PART_MAIN);
     lv_obj_align(status_label_2, LV_ALIGN_TOP_MID, 0, 60);
 
     // Move shared data table to screen_2
@@ -2156,7 +2191,7 @@ void create_screen_2(void) {
 
     // v4.08: Battery list container (shown with matching profiles on screen 2)
     screen2_battery_container = lv_obj_create(screen_2);
-    lv_obj_set_size(screen2_battery_container, 950, 280);
+    lv_obj_set_size(screen2_battery_container, 950, 300);
     lv_obj_set_pos(screen2_battery_container, 37, 260);  // Below table
     lv_obj_set_style_bg_color(screen2_battery_container, lv_color_hex(0xF0F0F0), LV_PART_MAIN);
     lv_obj_set_style_border_width(screen2_battery_container, 2, LV_PART_MAIN);
@@ -2199,7 +2234,7 @@ void create_screen_2(void) {
     // Confirmed battery label (below table, above buttons) - hidden by default
     screen2_confirmed_battery_label = lv_label_create(screen_2);
     lv_label_set_text(screen2_confirmed_battery_label, "");
-    lv_obj_set_style_text_font(screen2_confirmed_battery_label, &lv_font_montserrat_30, LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen2_confirmed_battery_label, &lv_font_montserrat_28, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirmed_battery_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen2_confirmed_battery_label, LV_ALIGN_TOP_LEFT, 12, 240);  // Below table (table is at y=110, ~100px tall)
     lv_obj_add_flag(screen2_confirmed_battery_label, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
@@ -2220,31 +2255,31 @@ void create_screen_2(void) {
 
     // Title label
     screen2_confirm_title_label = lv_label_create(screen2_confirm_popup);
-    lv_label_set_text(screen2_confirm_title_label, "Confirm Battery:");
+    lv_label_set_text(screen2_confirm_title_label, "Confirm");
     lv_obj_set_style_text_font(screen2_confirm_title_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_title_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen2_confirm_title_label, LV_ALIGN_TOP_MID, 0, 20);
 
-    // Battery info label (voltage and Ah) - above TV/TC
+    // Battery info: displayName on first line, batteryName on second line (font 28)
     screen2_confirm_battery_info_label = lv_label_create(screen2_confirm_popup);
-    lv_label_set_text(screen2_confirm_battery_info_label, "-- V, -- Ah");
-    lv_obj_set_style_text_font(screen2_confirm_battery_info_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_label_set_text(screen2_confirm_battery_info_label, "--\n--");
+    lv_obj_set_style_text_font(screen2_confirm_battery_info_label, &lv_font_montserrat_28, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_battery_info_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen2_confirm_battery_info_label, LV_ALIGN_TOP_MID, 0, 60);
+    lv_obj_align(screen2_confirm_battery_info_label, LV_ALIGN_TOP_MID, 0, 55);
 
-    // Target Voltage label (TV) - 30pt - large and bold-looking
+    // Target Voltage label - below battery name block
     screen2_confirm_voltage_label = lv_label_create(screen2_confirm_popup);
     lv_label_set_text(screen2_confirm_voltage_label, "Target Voltage: -- V");
     lv_obj_set_style_text_font(screen2_confirm_voltage_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_voltage_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen2_confirm_voltage_label, LV_ALIGN_TOP_MID, 0, 100);
+    lv_obj_align(screen2_confirm_voltage_label, LV_ALIGN_TOP_MID, 0, 130);
 
-    // Target Current label (TC) - 30pt - large and bold-looking
+    // Target Current label
     screen2_confirm_capacity_label = lv_label_create(screen2_confirm_popup);
     lv_label_set_text(screen2_confirm_capacity_label, "Target Current: -- A");
     lv_obj_set_style_text_font(screen2_confirm_capacity_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_capacity_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen2_confirm_capacity_label, LV_ALIGN_TOP_MID, 0, 150);
+    lv_obj_align(screen2_confirm_capacity_label, LV_ALIGN_TOP_MID, 0, 180);
 
     // Current label (unused, hidden)
     screen2_confirm_current_label = lv_label_create(screen2_confirm_popup);
@@ -2339,7 +2374,7 @@ void create_screen_3(void) {
     lv_table_set_row_cnt(screen3_timer_table, 2);
     lv_table_set_col_width(screen3_timer_table, 0, 200);
     lv_table_set_col_width(screen3_timer_table, 1, 200);
-    lv_table_set_col_width(screen3_timer_table, 2, 200);
+    lv_table_set_col_width(screen3_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
     lv_table_set_cell_value(screen3_timer_table, 0, 0, "Total Time");
     lv_table_set_cell_value(screen3_timer_table, 0, 1, "");
     lv_table_set_cell_value(screen3_timer_table, 0, 2, "Charged(Ah)");
@@ -2349,7 +2384,7 @@ void create_screen_3(void) {
     lv_obj_set_style_bg_color(screen3_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen3_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen3_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen3_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
+    lv_obj_set_style_text_font(screen3_timer_table, &lv_font_montserrat_26, LV_PART_ITEMS);
     lv_obj_align(screen3_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen3_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -2422,7 +2457,7 @@ void create_screen_4(void) {
     lv_table_set_row_cnt(screen4_timer_table, 2);
     lv_table_set_col_width(screen4_timer_table, 0, 200);
     lv_table_set_col_width(screen4_timer_table, 1, 200);
-    lv_table_set_col_width(screen4_timer_table, 2, 200);
+    lv_table_set_col_width(screen4_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
     lv_table_set_cell_value(screen4_timer_table, 0, 0, "Total Time");
     lv_table_set_cell_value(screen4_timer_table, 0, 1, "");
     lv_table_set_cell_value(screen4_timer_table, 0, 2, "Charged(Ah)");
@@ -2432,7 +2467,7 @@ void create_screen_4(void) {
     lv_obj_set_style_bg_color(screen4_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen4_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen4_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen4_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
+    lv_obj_set_style_text_font(screen4_timer_table, &lv_font_montserrat_26, LV_PART_ITEMS);
     lv_obj_align(screen4_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen4_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -2504,7 +2539,7 @@ void create_screen_5(void) {
     lv_table_set_row_cnt(screen5_timer_table, 2);
     lv_table_set_col_width(screen5_timer_table, 0, 200);
     lv_table_set_col_width(screen5_timer_table, 1, 200);
-    lv_table_set_col_width(screen5_timer_table, 2, 200);
+    lv_table_set_col_width(screen5_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
     lv_table_set_cell_value(screen5_timer_table, 0, 0, "Total Time");
     lv_table_set_cell_value(screen5_timer_table, 0, 1, "Remaining");
     lv_table_set_cell_value(screen5_timer_table, 0, 2, "Charged(Ah)");
@@ -2514,7 +2549,7 @@ void create_screen_5(void) {
     lv_obj_set_style_bg_color(screen5_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen5_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen5_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen5_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
+    lv_obj_set_style_text_font(screen5_timer_table, &lv_font_montserrat_26, LV_PART_ITEMS);
     lv_obj_align(screen5_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen5_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -2560,6 +2595,13 @@ void create_screen_6(void) {
     lv_obj_set_style_text_font(screen6_status_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(screen6_status_label, LV_ALIGN_TOP_MID, 0, 60);
 
+    // Selected battery details label (below table)
+    screen6_battery_details_label = lv_label_create(screen_6);
+    lv_label_set_text(screen6_battery_details_label, "Selected Battery: --");
+    lv_obj_set_style_text_color(screen6_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen6_battery_details_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(screen6_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);
+
     // Move shared data table to screen_6
     if (data_table != nullptr) {
         lv_obj_set_parent(data_table, screen_6);
@@ -2572,7 +2614,7 @@ void create_screen_6(void) {
     lv_table_set_row_cnt(screen6_timer_table, 2);
     lv_table_set_col_width(screen6_timer_table, 0, 200);
     lv_table_set_col_width(screen6_timer_table, 1, 200);
-    lv_table_set_col_width(screen6_timer_table, 2, 200);
+    lv_table_set_col_width(screen6_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
     lv_table_set_cell_value(screen6_timer_table, 0, 0, "Total Time");
     lv_table_set_cell_value(screen6_timer_table, 0, 1, "Remaining");
     lv_table_set_cell_value(screen6_timer_table, 0, 2, "Charged(Ah)");
@@ -2582,7 +2624,7 @@ void create_screen_6(void) {
     lv_obj_set_style_bg_color(screen6_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen6_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen6_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen6_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
+    lv_obj_set_style_text_font(screen6_timer_table, &lv_font_montserrat_26, LV_PART_ITEMS);
     lv_obj_align(screen6_timer_table, LV_ALIGN_TOP_MID, 0, 270);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen6_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -2645,6 +2687,13 @@ void create_screen_7(void) {
     lv_obj_set_style_text_font(screen7_status_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(screen7_status_label, LV_ALIGN_TOP_MID, 0, 60);
 
+    // Selected battery details label (below table)
+    screen7_battery_details_label = lv_label_create(screen_7);
+    lv_label_set_text(screen7_battery_details_label, "Selected Battery: --");
+    lv_obj_set_style_text_color(screen7_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen7_battery_details_label, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_align(screen7_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);
+
     // Move shared data table to screen_7
     if (data_table != nullptr) {
         lv_obj_set_parent(data_table, screen_7);
@@ -2657,7 +2706,7 @@ void create_screen_7(void) {
     lv_table_set_row_cnt(screen7_timer_table, 2);
     lv_table_set_col_width(screen7_timer_table, 0, 200);
     lv_table_set_col_width(screen7_timer_table, 1, 200);
-    lv_table_set_col_width(screen7_timer_table, 2, 200);
+    lv_table_set_col_width(screen7_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
     lv_table_set_cell_value(screen7_timer_table, 0, 0, "Total Time");
     lv_table_set_cell_value(screen7_timer_table, 0, 1, "");
     lv_table_set_cell_value(screen7_timer_table, 0, 2, "Charged(Ah)");
@@ -2667,7 +2716,7 @@ void create_screen_7(void) {
     lv_obj_set_style_bg_color(screen7_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen7_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen7_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen7_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
+    lv_obj_set_style_text_font(screen7_timer_table, &lv_font_montserrat_26, LV_PART_ITEMS);
     lv_obj_align(screen7_timer_table, LV_ALIGN_TOP_MID, 0, 270);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen7_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -2756,7 +2805,7 @@ void create_screen_8(void) {
     lv_table_set_row_cnt(screen8_timer_table, 2);
     lv_table_set_col_width(screen8_timer_table, 0, 200);
     lv_table_set_col_width(screen8_timer_table, 1, 200);
-    lv_table_set_col_width(screen8_timer_table, 2, 200);
+    lv_table_set_col_width(screen8_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
     lv_table_set_cell_value(screen8_timer_table, 0, 0, "Total Time");
     lv_table_set_cell_value(screen8_timer_table, 0, 1, "Remaining");
     lv_table_set_cell_value(screen8_timer_table, 0, 2, "Charged(Ah)");
@@ -2766,7 +2815,7 @@ void create_screen_8(void) {
     lv_obj_set_style_bg_color(screen8_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen8_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen8_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen8_timer_table, &lv_font_montserrat_24, LV_PART_ITEMS);  // Next available font size
+    lv_obj_set_style_text_font(screen8_timer_table, &lv_font_montserrat_26, LV_PART_ITEMS);
     lv_obj_align(screen8_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Same position as screens 3,4,5
     lv_obj_clear_flag(screen8_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -2910,7 +2959,7 @@ void create_screen_18(void) {
 
     // Labels above table (table at y=110, ~100px tall)
     lv_obj_t* title = lv_label_create(screen_18);
-    lv_label_set_text(title, "Connection failed or lost with M2 V3.9"); //update ver number here too
+    lv_label_set_text(title, "Connection failed or lost with M2 V4.0"); //update ver number here too
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);

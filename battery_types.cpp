@@ -32,10 +32,10 @@ void initializeBatteryProfiles() {
     Serial.println("Initializing battery profiles...");
     //batteryProfiles.addProfile(new BatteryType(chemistry, voltage, ah, cutoff, current));
     //default battery for screen2 , 0volt
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 0, 0, 0.0, 0.0));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 0, 0, 0.0, 0.0, "default"));
     // 12V Lead Acid batteries (cutoff 16V)
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 10, 16.0, 6.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 20, 13.0, 12.0));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 10, 16.0, 6.0, "Old Nishiarai 2f"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 20, 13.0, 12.0, "Low cutoff test"));
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 20, 16.0, 12.0));
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 35, 16.0, 21.0));
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 65, 16.0, 30.0));
