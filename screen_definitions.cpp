@@ -162,10 +162,8 @@ static unsigned long last_voltage_saturation_check_time = 0;  // Last time volta
 static float voltage_saturation_detected_voltage = 0.0f;      // Voltage when saturation was detected
 static unsigned long voltage_saturation_cv_start_time = 0;   // CV start time for screen 8 state
 
-// M2 heartbeat: RTC-based connection check (every 3s, first check after 3s from startup)
+// M2 heartbeat: frame 101 based (check every 1s after 6s grace; if no 101 for 2100ms -> lost)
 static bool m2_connection_lost = false;
-static uint32_t past_m2_rtc = 0;
-static bool first_heartbeat_compare_done = false;  // Skip first comparison (startup/default RTC)
 
 // Forward declarations for battery profile functions
 void displayMatchingBatteryProfiles(float detectedVoltage, lv_obj_t* container);
@@ -1452,25 +1450,24 @@ void update_screen_based_on_state() {
     }
 }
 
-// M2 heartbeat: run every 3s from loop (first run after 3s). If RTC diff outside 2-4s, go to screen 18.
+// M2 heartbeat: run every 1s from loop. 6s grace for first frame 101 to arrive.
+// After grace: if no frame ever (can101_rx_timestamp == 0) or last frame > 2100 ms ago -> M2 lost (screen 18).
 void check_m2_heartbeat(void) {
-    uint32_t present_m2_rtc = calc_timeofmonth();
-    if (past_m2_rtc != 0) {
-        uint32_t diff = present_m2_rtc - past_m2_rtc;
-        if (!first_heartbeat_compare_done) {
-            first_heartbeat_compare_done = true;  // Ignore first comparison (startup/default RTC)
-        } else {
-            if (diff < 2 || diff > 4) {
-                m2_connection_lost = true;
-                if (current_screen_id != SCREEN_M2_LOST) {
-                    switch_to_screen(SCREEN_M2_LOST);
-                }
-            } else {
-                m2_connection_lost = false;
-            }
-        }
+    const unsigned long GRACE_MS = 6000;
+    const unsigned long LOST_THRESHOLD_MS = 2100;
+    unsigned long now = (unsigned long) millis();
+    if (now < GRACE_MS) {
+        return;
     }
-    past_m2_rtc = present_m2_rtc;
+    unsigned long last_101 = (unsigned long) can101_rx_timestamp;
+    if (last_101 == 0 || (now - last_101) > LOST_THRESHOLD_MS) {
+        m2_connection_lost = true;
+        if (current_screen_id != SCREEN_M2_LOST) {
+            switch_to_screen(SCREEN_M2_LOST);
+        }
+    } else {
+        m2_connection_lost = false;
+    }
 }
 
 // ============================================================================
@@ -2030,7 +2027,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v4.0");
+    lv_label_set_text(title, "GCU 3kW Charger v4.1");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
@@ -2171,7 +2168,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v4.0");
+    lv_label_set_text(title, "GCU 3kW Charger v4.1");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2959,7 +2956,7 @@ void create_screen_18(void) {
 
     // Labels above table (table at y=110, ~100px tall)
     lv_obj_t* title = lv_label_create(screen_18);
-    lv_label_set_text(title, "Connection failed or lost with M2 V4.0"); //update ver number here too
+    lv_label_set_text(title, "Connection failed or lost with M2 V4.1"); //update ver number here too
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);

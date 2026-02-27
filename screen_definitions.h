@@ -101,7 +101,7 @@ void switch_to_screen(screen_id_t screen_id);
 void update_current_screen(void);
 screen_id_t determine_screen_from_state(void);
 void update_screen_based_on_state(void);
-void check_m2_heartbeat(void);  // Call every 3s from loop; first run after 3s from startup
+void check_m2_heartbeat(void);  // Call every 1s from loop; 6s startup grace, 2100ms no-frame-101 -> M2 lost
 
 // Table and UI update functions
 void update_table_values(void);

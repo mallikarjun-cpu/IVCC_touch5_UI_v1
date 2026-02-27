@@ -13,9 +13,10 @@ extern void initialize_all_screens();
 extern void update_screen_based_on_state();
 extern void update_table_values();
 extern void check_m2_heartbeat(void);
+extern volatile unsigned long can101_rx_timestamp;
 unsigned long last_table_update;
 static unsigned long last_heartbeat_check_ms = 0;
-static const unsigned long HEARTBEAT_CHECK_INTERVAL_MS = 3000;
+static const unsigned long HEARTBEAT_CHECK_INTERVAL_MS = 1000;
 
 // Forward declarations for screen management variables
 extern bool battery_detected;
@@ -127,7 +128,7 @@ void setup()
     delay(200);
     send_contactor_control(CONTACTOR_OPEN);
     
-    Serial.println("End of setup, setup success! ------ v4.0------  \n -----");
+    Serial.println("End of setup, setup success! ------ v4.1------  \n -----");
 }
 
 void loop()
@@ -148,7 +149,7 @@ void loop()
         last_table_update = millis();
     }
 
-    // M2 heartbeat: every 3s, first check after 3s from startup
+    // M2 heartbeat: every 1s, 6s startup grace; if (now - can101_rx_timestamp) > 2100 ms -> M2 lost (screen 18)
     if (millis() - last_heartbeat_check_ms >= HEARTBEAT_CHECK_INTERVAL_MS) {
         check_m2_heartbeat();
         last_heartbeat_check_ms = millis();

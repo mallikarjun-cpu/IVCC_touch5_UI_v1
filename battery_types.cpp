@@ -40,9 +40,9 @@ void initializeBatteryProfiles() {
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 35, 16.0, 21.0));
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 65, 16.0, 30.0));
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 100, 16.2, 60.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 100, 14.0, 90.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 120, 14.0, 120.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 150, 14.0, 150.0));
+    batteryProfiles.addProfile(new BatteryType(LIFEPO4, 12, 280, 14.0, 90.0, "LifPo nishiarai 0.4c"));
+    batteryProfiles.addProfile(new BatteryType(LIFEPO4, 12, 280, 14.0, 120.0, "LifPo nishiarai 0.4c"));
+    batteryProfiles.addProfile(new BatteryType(LIFEPO4, 12, 280, 14.0, 150.0, "Lifpo nishiarai 0.5c"));
 
     // 24V Lead Acid batteries (cutoff 33.2V) - also used for 28.8V rated hoist batteries
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 24, 10, 33.2, 6.0));
@@ -61,9 +61,9 @@ void initializeBatteryProfiles() {
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 18, 20, 21.0, 12.0));
 
     // 28V Lithium batteries
-    batteryProfiles.addProfile(new BatteryType(LITHIUM, 28, 10, 31.0, 5.0));
-    batteryProfiles.addProfile(new BatteryType(LITHIUM, 28, 20, 33.0, 9.0)); //ronin 2c
-    batteryProfiles.addProfile(new BatteryType(LITHIUM, 28, 40, 33.0, 18.0)); //ronin 4c
+    batteryProfiles.addProfile(new BatteryType(LITHIUM, 28, 4.5, 31.0, 5.0, "Ronin_OLD"));
+    batteryProfiles.addProfile(new BatteryType(LITHIUM, 28, 4.5, 33.0, 9.0, "Ronin_OLD 2C")); //ronin 2c
+    batteryProfiles.addProfile(new BatteryType(LITHIUM, 28, 4.5, 33.0, 18.0, "Ronin_OLD 4C")); //ronin 4c
 
     // 48V Lithium batteries (cutoff 53.9V)
     batteryProfiles.addProfile(new BatteryType(LITHIUM, 48, 5, 52, 3.0));

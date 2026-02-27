@@ -39,6 +39,8 @@ bool send_can_frame(uint32_t id, uint8_t* data, uint8_t length);
 bool receive_can_frame(twai_message_t* message);
 void can_task(void* parameter);
 bool send_contactor_control(uint8_t command);  // Send contactor control command (0x4C = close, 0x8B = open)
-uint32_t calc_timeofmonth(void);  // RTC time-of-month in seconds (for M2 heartbeat)
+
+// M2 heartbeat: updated to millis() on reception of CAN frame 0x101 (validated every 1s after 6s grace)
+extern volatile unsigned long can101_rx_timestamp;
 
 #endif // CAN_TWAI_H
