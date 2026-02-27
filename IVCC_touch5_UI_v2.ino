@@ -128,7 +128,7 @@ void setup()
     delay(200);
     send_contactor_control(CONTACTOR_OPEN);
     
-    Serial.println("End of setup, setup success! ------ v4.1------  \n -----");
+    Serial.println("End of setup, setup success! ------ v4.2------  \n -----");
 }
 
 void loop()
