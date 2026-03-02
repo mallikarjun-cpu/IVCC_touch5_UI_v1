@@ -107,9 +107,9 @@ public:
         
         // Voltage detection ranges
         if (detectedVoltage >= 9 && detectedVoltage < 16) {
-            // Show 12V Lead Acid and 18V Lithium options
+            // Show 12V Lead Acid, 12V LiFePO4, and 18V Lithium options
             for (int i = 0; i < profileCount; i++) {
-                if ((profiles[i]->getRatedVoltage() == 12 && profiles[i]->getChemistry() == LEAD_ACID) ||
+                if ((profiles[i]->getRatedVoltage() == 12 && (profiles[i]->getChemistry() == LEAD_ACID || profiles[i]->getChemistry() == LIFEPO4)) ||
                     (profiles[i]->getRatedVoltage() == 18 && profiles[i]->getChemistry() == LITHIUM)) {
                     matches[matchCount++] = profiles[i];
                 }

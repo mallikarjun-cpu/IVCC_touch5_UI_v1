@@ -36,10 +36,12 @@ void initializeBatteryProfiles() {
     // 12V Lead Acid batteries (cutoff 16V)
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 10, 16.0, 6.0, "Old Nishiarai 2f"));
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 20, 13.0, 12.0, "Low cutoff test"));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 20, 16.0, 12.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 35, 16.0, 21.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 65, 16.0, 30.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 100, 16.2, 60.0));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 280, 15, 150.0, "Battery 10"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 20, 16.0, 12.0, "Battery 4"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 35, 16.0, 21.0, "Battery 5"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 65, 16.0, 30.0, "Battery 6"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 100, 16.2, 60.0, "Battery 7"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 280, 15, 100.0, "Battery 7"));
     batteryProfiles.addProfile(new BatteryType(LIFEPO4, 12, 280, 14.0, 90.0, "LifPo nishiarai 0.4c"));
     batteryProfiles.addProfile(new BatteryType(LIFEPO4, 12, 280, 14.0, 120.0, "LifPo nishiarai 0.4c"));
     batteryProfiles.addProfile(new BatteryType(LIFEPO4, 12, 280, 14.0, 150.0, "Lifpo nishiarai 0.5c"));

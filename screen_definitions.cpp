@@ -1215,23 +1215,22 @@ void update_current_screen() {
         sprintf(temp_text, "モーター温度: %.1f , GCU温度: %.1f", temp1_celsius, temp2_celsius);
         lv_label_set_text(screen5_temp_label, temp_text);
     }
-    // Update temperature label on screen 8 (same format as screens 3,4,5)
+    // Update temperature label on screen 8 (temp + 飽和電圧 on one line)
     if (screen8_temp_label != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
         float temp1_celsius = sensorData.temp1 / 100.0f;
         float temp2_celsius = sensorData.temp2 / 100.0f;
-        char temp_text[80];
-        sprintf(temp_text, "モーター温度: %.1f , GCU温度: %.1f", temp1_celsius, temp2_celsius);
+        char temp_text[120];
+        sprintf(temp_text, "モーター温度: %.1f , GCU温度: %.1f , 飽和電圧: %.2f V", temp1_celsius, temp2_celsius, voltage_saturation_detected_voltage);
         lv_label_set_text(screen8_temp_label, temp_text);
     }
     if (screen8_battery_details_label != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
         if (selected_battery_profile != nullptr) {
             char details_text[220];
-            sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)\n飽和電圧: %.2f V",
+            sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
                     selected_battery_profile->getBatteryName().c_str(),
                     selected_battery_profile->getDisplayName().c_str(),
                     selected_battery_profile->getCutoffVoltage(),
-                    selected_battery_profile->getConstCurrent(),
-                    voltage_saturation_detected_voltage);
+                    selected_battery_profile->getConstCurrent());
             lv_label_set_text(screen8_battery_details_label, details_text);
         } else {
             lv_label_set_text(screen8_battery_details_label, "選択電池: なし");
@@ -1889,6 +1888,10 @@ void screen2_reselect_button_event_handler(lv_event_t * e) {
 
         // Hide START and RE-SELECT buttons
         lv_obj_add_flag(screen2_button_container, LV_OBJ_FLAG_HIDDEN);
+        // Hide confirmed battery label so it doesn't overlap the battery list
+        if (screen2_confirmed_battery_label != nullptr) {
+            lv_obj_add_flag(screen2_confirmed_battery_label, LV_OBJ_FLAG_HIDDEN);
+        }
 
         // Show battery list again with current voltage
         if (sensorData.volt > 0) {
@@ -2037,16 +2040,16 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v4.2");
+    lv_label_set_text(title, "GCU 3kW 充電器 v4.3");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &arjunsJapFont_30, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
 
     // Status label (battery detected, etc)
     status_label = lv_label_create(screen_1);
-    lv_label_set_text(status_label, "接続してください");
+    lv_label_set_text(status_label, "電池を接続してください");
     lv_obj_set_style_text_color(status_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red for visibility
-    lv_obj_set_style_text_font(status_label, &arjunsJapFont_28, LV_PART_MAIN);
+    lv_obj_set_style_text_font(status_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_align(status_label, LV_ALIGN_TOP_MID, 0, 60);
 
     // Create or reposition shared data table
@@ -2069,6 +2072,7 @@ void create_screen_1()
         lv_table_set_cell_value(data_table, 0, 0, "電圧");
         lv_table_set_cell_value(data_table, 0, 1, "電流");
         lv_table_set_cell_value(data_table, 0, 2, "温度");
+        //lv_table_set_cell_value(data_table, 0, 3, "電力");
         lv_table_set_cell_value(data_table, 0, 3, "回転数");
         lv_table_set_cell_value(data_table, 0, 4, "ログ数");
 
@@ -2178,7 +2182,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v4.2");
+    lv_label_set_text(title, "GCU 3kW 充電器 v4.3");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &arjunsJapFont_28, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2187,8 +2191,8 @@ void create_screen_2(void) {
     lv_obj_t *status_label_2 = lv_label_create(screen_2);
     lv_label_set_text(status_label_2, "充電開始可能");
     lv_obj_set_style_text_color(status_label_2, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red for visibility
-    lv_obj_set_style_text_font(status_label_2, &arjunsJapFont_28, LV_PART_MAIN);
-    lv_obj_align(status_label_2, LV_ALIGN_TOP_MID, 0, 60);
+    lv_obj_set_style_text_font(status_label_2, &arjunsJapFont_30, LV_PART_MAIN);
+    lv_obj_align(status_label_2, LV_ALIGN_TOP_MID, 0, 50);
 
     // Move shared data table to screen_2
     if (data_table != nullptr) {
@@ -2198,8 +2202,8 @@ void create_screen_2(void) {
 
     // v4.08: Battery list container (shown with matching profiles on screen 2)
     screen2_battery_container = lv_obj_create(screen_2);
-    lv_obj_set_size(screen2_battery_container, 950, 300);
-    lv_obj_set_pos(screen2_battery_container, 37, 260);  // Below table
+    lv_obj_set_size(screen2_battery_container, 950, 310);
+    lv_obj_set_pos(screen2_battery_container, 37, 270);  // Below table
     lv_obj_set_style_bg_color(screen2_battery_container, lv_color_hex(0xF0F0F0), LV_PART_MAIN);
     lv_obj_set_style_border_width(screen2_battery_container, 2, LV_PART_MAIN);
     lv_obj_set_scroll_dir(screen2_battery_container, LV_DIR_VER);  // Vertical scroll
@@ -2243,7 +2247,7 @@ void create_screen_2(void) {
     lv_label_set_text(screen2_confirmed_battery_label, "");
     lv_obj_set_style_text_font(screen2_confirmed_battery_label, &arjunsJapFont_28, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirmed_battery_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen2_confirmed_battery_label, LV_ALIGN_TOP_LEFT, 12, 240);  // Below table (table is at y=110, ~100px tall)
+    lv_obj_align(screen2_confirmed_battery_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Below table (table is at y=110, ~100px tall)
     lv_obj_add_flag(screen2_confirmed_battery_label, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
 
     // Display 0V battery profiles by default during screen creation
@@ -2262,7 +2266,7 @@ void create_screen_2(void) {
 
     // Title label
     screen2_confirm_title_label = lv_label_create(screen2_confirm_popup);
-    lv_label_set_text(screen2_confirm_title_label, "Confirm");
+    lv_label_set_text(screen2_confirm_title_label, "確認");
     lv_obj_set_style_text_font(screen2_confirm_title_label, &arjunsJapFont_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_title_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen2_confirm_title_label, LV_ALIGN_TOP_MID, 0, 20);
@@ -2279,14 +2283,14 @@ void create_screen_2(void) {
     lv_label_set_text(screen2_confirm_voltage_label, "目標電圧: -- V");
     lv_obj_set_style_text_font(screen2_confirm_voltage_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_voltage_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen2_confirm_voltage_label, LV_ALIGN_TOP_MID, 0, 130);
+    lv_obj_align(screen2_confirm_voltage_label, LV_ALIGN_TOP_MID, 0, 150);
 
     // Target Current label
     screen2_confirm_capacity_label = lv_label_create(screen2_confirm_popup);
     lv_label_set_text(screen2_confirm_capacity_label, "目標電流: -- A");
     lv_obj_set_style_text_font(screen2_confirm_capacity_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_capacity_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_align(screen2_confirm_capacity_label, LV_ALIGN_TOP_MID, 0, 180);
+    lv_obj_align(screen2_confirm_capacity_label, LV_ALIGN_TOP_MID, 0, 200);
 
     // Current label (unused, hidden)
     screen2_confirm_current_label = lv_label_create(screen2_confirm_popup);
@@ -2343,22 +2347,23 @@ void create_screen_3(void) {
     lv_obj_t *title = lv_label_create(screen_3);
     lv_label_set_text(title, "Charge Started!");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
-    lv_obj_set_style_text_font(title, &arjunsJapFont_26, LV_PART_MAIN);  // Use available font
+    lv_obj_set_style_text_font(title, &arjunsJapFont_28, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
 
     // Status label (charging start - waiting for 1A)
     lv_obj_t *status_label_3 = lv_label_create(screen_3);
     char precharge_text[60];
-    sprintf(precharge_text, "ステップ1: 充電前、最大%.1fA", PRECHARGE_AMPS);
+    //sprintf(precharge_text, "ステップ1: 充電前、最大%.1fA", PRECHARGE_AMPS);
+    sprintf(precharge_text, "Step 1: Precharge, upto %.1f amps.", PRECHARGE_AMPS);
     lv_label_set_text(status_label_3, precharge_text);
     lv_obj_set_style_text_color(status_label_3, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
-    lv_obj_set_style_text_font(status_label_3, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(status_label_3, LV_ALIGN_TOP_MID, 0, 60);
+    lv_obj_set_style_text_font(status_label_3, &arjunsJapFont_28, LV_PART_MAIN);
+    lv_obj_align(status_label_3, LV_ALIGN_TOP_MID, 0, 50);
 
     // Move shared data table to screen_3
     if (data_table != nullptr) {
         lv_obj_set_parent(data_table, screen_3);
-        lv_obj_set_pos(data_table, 12, 110);
+        lv_obj_set_pos(data_table, 12, 80);
     }
 
     // Battery profile details label (below table, moved up 30px)
@@ -2366,14 +2371,14 @@ void create_screen_3(void) {
     lv_label_set_text(screen3_battery_details_label, "選択電池: --");
     lv_obj_set_style_text_color(screen3_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen3_battery_details_label, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(screen3_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);  // Moved up 30px (300 -> 270)
+    lv_obj_align(screen3_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
     
     // Temperature label (below battery details label)
     screen3_temp_label = lv_label_create(screen_3);
     lv_label_set_text(screen3_temp_label, "モーター温度: -- , GCU温度: --");
     lv_obj_set_style_text_color(screen3_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen3_temp_label, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(screen3_temp_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Below battery details label
+    lv_obj_align(screen3_temp_label, LV_ALIGN_TOP_LEFT, 12, 310);  // Below battery details label
     
     // Timer table (3x2) for screen 3 - below battery label, left aligned
     screen3_timer_table = lv_table_create(screen_3);
@@ -2391,20 +2396,21 @@ void create_screen_3(void) {
     lv_obj_set_style_bg_color(screen3_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen3_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen3_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen3_timer_table, &arjunsJapFont_26, LV_PART_ITEMS);
-    lv_obj_align(screen3_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
+    lv_obj_set_style_text_font(screen3_timer_table, &arjunsJapFont_28, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(screen3_timer_table, 5, LV_PART_ITEMS);  // 5px cell padding to reduce row height
+    lv_obj_align(screen3_timer_table, LV_ALIGN_TOP_MID, 0, 370);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen3_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
 
     // Emergency Stop button (bottom mid, large and visible, one-line label)
     lv_obj_t* screen3_emergency_stop_btn = lv_btn_create(screen_3);
     lv_obj_set_size(screen3_emergency_stop_btn, 360, 80);
-    lv_obj_align(screen3_emergency_stop_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_align(screen3_emergency_stop_btn, LV_ALIGN_BOTTOM_MID, 0, -5);
     lv_obj_set_style_bg_color(screen3_emergency_stop_btn, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
     lv_obj_add_event_cb(screen3_emergency_stop_btn, emergency_stop_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_clear_flag(screen3_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen3_emergency_stop_label = lv_label_create(screen3_emergency_stop_btn);
-    lv_label_set_text(screen3_emergency_stop_label, "危険停止");
+    lv_label_set_text(screen3_emergency_stop_label, "緊急停止");
     lv_obj_set_style_text_font(screen3_emergency_stop_label, &arjunsJapFont_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen3_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen3_emergency_stop_label);
@@ -2428,15 +2434,15 @@ void create_screen_4(void) {
     lv_obj_t *title = lv_label_create(screen_4);
     lv_label_set_text(title, "Constant Current Mode");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
-    lv_obj_set_style_text_font(title, &arjunsJapFont_26, LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, &arjunsJapFont_28, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
 
     // Status label (CC charging in progress)
     lv_obj_t *status_label_4 = lv_label_create(screen_4);
     lv_label_set_text(status_label_4, "ステップ2、定電流充電");
     lv_obj_set_style_text_color(status_label_4, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
-    lv_obj_set_style_text_font(status_label_4, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(status_label_4, LV_ALIGN_TOP_MID, 0, 60);
+    lv_obj_set_style_text_font(status_label_4, &arjunsJapFont_28, LV_PART_MAIN);
+    lv_obj_align(status_label_4, LV_ALIGN_TOP_MID, 0, 50);
 
     // Move shared data table to screen_4
     if (data_table != nullptr) {
@@ -2449,14 +2455,14 @@ void create_screen_4(void) {
     lv_label_set_text(screen4_battery_details_label, "選択電池: --");
     lv_obj_set_style_text_color(screen4_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen4_battery_details_label, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(screen4_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);  // Moved up 30px (300 -> 270)
+    lv_obj_align(screen4_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
     
     // Temperature label (below battery details label)
     screen4_temp_label = lv_label_create(screen_4);
     lv_label_set_text(screen4_temp_label, "モーター温度: -- , GCU温度: --");
     lv_obj_set_style_text_color(screen4_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen4_temp_label, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(screen4_temp_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Below battery details label
+    lv_obj_align(screen4_temp_label, LV_ALIGN_TOP_LEFT, 12, 310);  // Below battery details label
     
     // Timer table (3x2) for screen 4 - below battery label, left aligned
     screen4_timer_table = lv_table_create(screen_4);
@@ -2474,20 +2480,21 @@ void create_screen_4(void) {
     lv_obj_set_style_bg_color(screen4_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen4_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen4_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen4_timer_table, &arjunsJapFont_26, LV_PART_ITEMS);
-    lv_obj_align(screen4_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
+    lv_obj_set_style_text_font(screen4_timer_table, &arjunsJapFont_28, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(screen4_timer_table, 5, LV_PART_ITEMS);  // 5px cell padding to reduce row height
+    lv_obj_align(screen4_timer_table, LV_ALIGN_TOP_MID, 0, 370);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen4_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
 
     // Emergency Stop button (bottom mid, large and visible, one-line label)
     lv_obj_t* screen4_emergency_stop_btn = lv_btn_create(screen_4);
     lv_obj_set_size(screen4_emergency_stop_btn, 360, 80);
-    lv_obj_align(screen4_emergency_stop_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_align(screen4_emergency_stop_btn, LV_ALIGN_BOTTOM_MID, 0, -5);
     lv_obj_set_style_bg_color(screen4_emergency_stop_btn, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red
     lv_obj_add_event_cb(screen4_emergency_stop_btn, emergency_stop_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_clear_flag(screen4_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen4_emergency_stop_label = lv_label_create(screen4_emergency_stop_btn);
-    lv_label_set_text(screen4_emergency_stop_label, "危険停止");
+    lv_label_set_text(screen4_emergency_stop_label, "緊急停止");
     lv_obj_set_style_text_font(screen4_emergency_stop_label, &arjunsJapFont_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen4_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen4_emergency_stop_label);
@@ -2510,15 +2517,15 @@ void create_screen_5(void) {
     lv_obj_t *title = lv_label_create(screen_5);
     lv_label_set_text(title, "Constant Voltage Mode");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
-    lv_obj_set_style_text_font(title, &arjunsJapFont_26, LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, &arjunsJapFont_28, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
 
     // Status label (CV charging in progress)
     lv_obj_t *status_label_5 = lv_label_create(screen_5);
     lv_label_set_text(status_label_5, "ステップ3、定電圧充電");
     lv_obj_set_style_text_color(status_label_5, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
-    lv_obj_set_style_text_font(status_label_5, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(status_label_5, LV_ALIGN_TOP_MID, 0, 60);
+    lv_obj_set_style_text_font(status_label_5, &arjunsJapFont_28, LV_PART_MAIN);
+    lv_obj_align(status_label_5, LV_ALIGN_TOP_MID, 0, 50);
 
     // Move shared data table to screen_5
     if (data_table != nullptr) {
@@ -2531,14 +2538,14 @@ void create_screen_5(void) {
     lv_label_set_text(screen5_battery_details_label, "選択電池: --");
     lv_obj_set_style_text_color(screen5_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen5_battery_details_label, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(screen5_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);  // Moved up 30px (300 -> 270)
+    lv_obj_align(screen5_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
     
     // Temperature label (below battery details label)
     screen5_temp_label = lv_label_create(screen_5);
     lv_label_set_text(screen5_temp_label, "モーター温度: -- , GCU温度: --");
     lv_obj_set_style_text_color(screen5_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen5_temp_label, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(screen5_temp_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Below battery details label
+    lv_obj_align(screen5_temp_label, LV_ALIGN_TOP_LEFT, 12, 310);  // Below battery details label
     
     // Timer table (3x2) for screen 5 - shows total time, remaining time, and Ah, below battery label, left aligned
     screen5_timer_table = lv_table_create(screen_5);
@@ -2556,8 +2563,9 @@ void create_screen_5(void) {
     lv_obj_set_style_bg_color(screen5_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen5_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen5_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen5_timer_table, &arjunsJapFont_26, LV_PART_ITEMS);
-    lv_obj_align(screen5_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
+    lv_obj_set_style_text_font(screen5_timer_table, &arjunsJapFont_28, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(screen5_timer_table, 5, LV_PART_ITEMS);  // 5px cell padding to reduce row height
+    lv_obj_align(screen5_timer_table, LV_ALIGN_TOP_MID, 0, 370);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen5_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
 
@@ -2569,7 +2577,7 @@ void create_screen_5(void) {
     lv_obj_add_event_cb(screen5_emergency_stop_btn, emergency_stop_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_clear_flag(screen5_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen5_emergency_stop_label = lv_label_create(screen5_emergency_stop_btn);
-    lv_label_set_text(screen5_emergency_stop_label, "危険停止");
+    lv_label_set_text(screen5_emergency_stop_label, "緊急停止");
     lv_obj_set_style_text_font(screen5_emergency_stop_label, &arjunsJapFont_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen5_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen5_emergency_stop_label);
@@ -2592,22 +2600,22 @@ void create_screen_6(void) {
     lv_obj_t *title = lv_label_create(screen_6);
     lv_label_set_text(title, "Charging Complete!");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
-    lv_obj_set_style_text_font(title, &arjunsJapFont_26, LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, &arjunsJapFont_28, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
 
     // Status label (will be updated dynamically based on charge_stop_reason)
     screen6_status_label = lv_label_create(screen_6);
     lv_label_set_text(screen6_status_label, "充電完了");
     lv_obj_set_style_text_color(screen6_status_label, lv_color_hex(0x006400), LV_PART_MAIN);  // Dark green
-    lv_obj_set_style_text_font(screen6_status_label, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(screen6_status_label, LV_ALIGN_TOP_MID, 0, 60);
+    lv_obj_set_style_text_font(screen6_status_label, &arjunsJapFont_30, LV_PART_MAIN);
+    lv_obj_align(screen6_status_label, LV_ALIGN_TOP_MID, 0, 50);
 
     // Selected battery details label (below table)
     screen6_battery_details_label = lv_label_create(screen_6);
     lv_label_set_text(screen6_battery_details_label, "選択電池: --");
     lv_obj_set_style_text_color(screen6_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen6_battery_details_label, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(screen6_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);
+    lv_obj_align(screen6_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);
 
     // Move shared data table to screen_6
     if (data_table != nullptr) {
@@ -2631,27 +2639,28 @@ void create_screen_6(void) {
     lv_obj_set_style_bg_color(screen6_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen6_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen6_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen6_timer_table, &arjunsJapFont_26, LV_PART_ITEMS);
-    lv_obj_align(screen6_timer_table, LV_ALIGN_TOP_MID, 0, 270);  // Centered horizontally, same vertical position
+    lv_obj_set_style_text_font(screen6_timer_table, &arjunsJapFont_28, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(screen6_timer_table, 5, LV_PART_ITEMS);  // 5px cell padding to reduce row height
+    lv_obj_align(screen6_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen6_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
 
     // Home button (bottom mid)
     lv_obj_t* screen6_home_btn = lv_btn_create(screen_6);
     lv_obj_set_size(screen6_home_btn, 200, 80);
-    lv_obj_align(screen6_home_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_align(screen6_home_btn, LV_ALIGN_BOTTOM_MID, 0, -5);
     lv_obj_set_style_bg_color(screen6_home_btn, lv_color_hex(0x4A90E2), LV_PART_MAIN);  // Blue
     lv_obj_add_event_cb(screen6_home_btn, home_button_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_clear_flag(screen6_home_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen6_home_label = lv_label_create(screen6_home_btn);
-    lv_label_set_text(screen6_home_label, "戻");
+    lv_label_set_text(screen6_home_label, "戻る");
     lv_obj_set_style_text_font(screen6_home_label, &arjunsJapFont_28, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen6_home_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen6_home_label);
 
     // Create remove battery popup for screen 6
     screen6_remove_battery_popup = lv_obj_create(screen_6);
-    lv_obj_set_size(screen6_remove_battery_popup, 700, 300);
+    lv_obj_set_size(screen6_remove_battery_popup, 700, 350);
     lv_obj_center(screen6_remove_battery_popup);
     lv_obj_set_style_bg_color(screen6_remove_battery_popup, lv_color_hex(0xFFE4B5), LV_PART_MAIN);  // Moccasin background
     lv_obj_set_style_border_width(screen6_remove_battery_popup, 4, LV_PART_MAIN);
@@ -2682,7 +2691,7 @@ void create_screen_7(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_7);
-    lv_label_set_text(title, "危険停止");
+    lv_label_set_text(title, "緊急停止");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &arjunsJapFont_26, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2699,7 +2708,7 @@ void create_screen_7(void) {
     lv_label_set_text(screen7_battery_details_label, "選択電池: --");
     lv_obj_set_style_text_color(screen7_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen7_battery_details_label, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(screen7_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);
+    lv_obj_align(screen7_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);
 
     // Move shared data table to screen_7
     if (data_table != nullptr) {
@@ -2723,27 +2732,28 @@ void create_screen_7(void) {
     lv_obj_set_style_bg_color(screen7_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen7_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen7_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen7_timer_table, &arjunsJapFont_26, LV_PART_ITEMS);
-    lv_obj_align(screen7_timer_table, LV_ALIGN_TOP_MID, 0, 270);  // Centered horizontally, same vertical position
+    lv_obj_set_style_text_font(screen7_timer_table, &arjunsJapFont_28, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(screen7_timer_table, 5, LV_PART_ITEMS);  // 5px cell padding to reduce row height
+    lv_obj_align(screen7_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen7_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
 
     // Home button (bottom mid)
     lv_obj_t* screen7_home_btn = lv_btn_create(screen_7);
     lv_obj_set_size(screen7_home_btn, 200, 80);
-    lv_obj_align(screen7_home_btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_align(screen7_home_btn, LV_ALIGN_BOTTOM_MID, 0, -5);
     lv_obj_set_style_bg_color(screen7_home_btn, lv_color_hex(0x4A90E2), LV_PART_MAIN);  // Blue
     lv_obj_add_event_cb(screen7_home_btn, home_button_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_clear_flag(screen7_home_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen7_home_label = lv_label_create(screen7_home_btn);
-    lv_label_set_text(screen7_home_label, "戻");
+    lv_label_set_text(screen7_home_label, "戻る");
     lv_obj_set_style_text_font(screen7_home_label, &arjunsJapFont_28, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen7_home_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen7_home_label);
 
     // Create remove battery popup for screen 7
     screen7_remove_battery_popup = lv_obj_create(screen_7);
-    lv_obj_set_size(screen7_remove_battery_popup, 700, 300);
+    lv_obj_set_size(screen7_remove_battery_popup, 700, 350);
     lv_obj_center(screen7_remove_battery_popup);
     lv_obj_set_style_bg_color(screen7_remove_battery_popup, lv_color_hex(0xFFE4B5), LV_PART_MAIN);  // Moccasin background
     lv_obj_set_style_border_width(screen7_remove_battery_popup, 4, LV_PART_MAIN);
@@ -2762,7 +2772,8 @@ void create_screen_7(void) {
     Serial.println("[SCREEN] Screen 7 (Emergency Stop) created successfully");
 }
 
-//screen 8 - Voltage saturation detected
+//screen 8 - Voltage saturation detected (Jap)
+// Screen 8 labels (Jap): title; status_label_8 "飽和電圧でCV充電中"; data_table; screen8_battery_details_label (選択電池 + 飽和電圧 → update_current_screen()); screen8_temp_label (モーター温度/GCU温度 → update_current_screen()); screen8_timer_table; screen8_emergency_stop_btn/label "緊急停止".
 void create_screen_8(void) {
     screen_8 = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(screen_8, lv_color_hex(0xD3D3D3), LV_PART_MAIN);  // Light gray background
@@ -2797,14 +2808,14 @@ void create_screen_8(void) {
     lv_label_set_text(screen8_battery_details_label, "選択電池: --");
     lv_obj_set_style_text_color(screen8_battery_details_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen8_battery_details_label, &arjunsJapFont_24, LV_PART_MAIN);
-    lv_obj_align(screen8_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);
+    lv_obj_align(screen8_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);
     
     // Temperature label (below battery details, same position and size as screens 3,4,5)
     screen8_temp_label = lv_label_create(screen_8);
     lv_label_set_text(screen8_temp_label, "モーター温度: -- , GCU温度: --");
     lv_obj_set_style_text_color(screen8_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen8_temp_label, &arjunsJapFont_26, LV_PART_MAIN);
-    lv_obj_align(screen8_temp_label, LV_ALIGN_TOP_LEFT, 12, 270);
+    lv_obj_align(screen8_temp_label, LV_ALIGN_TOP_LEFT, 12, 310);
     
     // Timer table (3x2) for screen 8 - below temp label, same position as screens 3,4,5
     screen8_timer_table = lv_table_create(screen_8);
@@ -2822,8 +2833,9 @@ void create_screen_8(void) {
     lv_obj_set_style_bg_color(screen8_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen8_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen8_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen8_timer_table, &arjunsJapFont_26, LV_PART_ITEMS);
-    lv_obj_align(screen8_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Same position as screens 3,4,5
+    lv_obj_set_style_text_font(screen8_timer_table, &arjunsJapFont_28, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(screen8_timer_table, 5, LV_PART_ITEMS);  // 5px cell padding to reduce row height
+    lv_obj_align(screen8_timer_table, LV_ALIGN_TOP_MID, 0, 370);  // Same position as screens 3,4,5
     lv_obj_clear_flag(screen8_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
 
@@ -2835,7 +2847,7 @@ void create_screen_8(void) {
     lv_obj_add_event_cb(screen8_emergency_stop_btn, emergency_stop_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_clear_flag(screen8_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen8_emergency_stop_label = lv_label_create(screen8_emergency_stop_btn);
-    lv_label_set_text(screen8_emergency_stop_label, "危険停止");
+    lv_label_set_text(screen8_emergency_stop_label, "緊急停止");
     lv_obj_set_style_text_font(screen8_emergency_stop_label, &arjunsJapFont_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen8_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen8_emergency_stop_label);
@@ -2966,7 +2978,7 @@ void create_screen_18(void) {
 
     // Labels above table (table at y=110, ~100px tall)
     lv_obj_t* title = lv_label_create(screen_18);
-    lv_label_set_text(title, "Connection failed or lost with M2 V4.2"); //update ver number here too
+    lv_label_set_text(title, "Connection failed or lost with M2 V4.3"); //update ver number here too
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
@@ -4885,6 +4897,10 @@ void screen2_reselect_button_event_handler(lv_event_t * e) {
 
         // Hide START and RE-SELECT buttons
         lv_obj_add_flag(screen2_button_container, LV_OBJ_FLAG_HIDDEN);
+        // Hide confirmed battery label so it doesn't overlap the battery list
+        if (screen2_confirmed_battery_label != nullptr) {
+            lv_obj_add_flag(screen2_confirmed_battery_label, LV_OBJ_FLAG_HIDDEN);
+        }
 
         // Show battery list again with current voltage
         if (sensorData.volt > 0) {
@@ -5033,7 +5049,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v4.1");
+    lv_label_set_text(title, "GCU 3kW Charger v4.3");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
@@ -5174,7 +5190,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v4.1");
+    lv_label_set_text(title, "GCU 3kW Charger v4.3");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -5387,7 +5403,8 @@ void create_screen_3(void) {
     lv_obj_set_style_bg_color(screen3_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen3_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen3_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen3_timer_table, &lv_font_montserrat_26, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen3_timer_table, &lv_font_montserrat_28, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(screen3_timer_table, 5, LV_PART_ITEMS);  // 5px cell padding to reduce row height
     lv_obj_align(screen3_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen3_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -5470,7 +5487,8 @@ void create_screen_4(void) {
     lv_obj_set_style_bg_color(screen4_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen4_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen4_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen4_timer_table, &lv_font_montserrat_26, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen4_timer_table, &lv_font_montserrat_28, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(screen4_timer_table, 5, LV_PART_ITEMS);  // 5px cell padding to reduce row height
     lv_obj_align(screen4_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen4_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -5552,7 +5570,8 @@ void create_screen_5(void) {
     lv_obj_set_style_bg_color(screen5_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen5_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen5_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen5_timer_table, &lv_font_montserrat_26, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen5_timer_table, &lv_font_montserrat_28, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(screen5_timer_table, 5, LV_PART_ITEMS);  // 5px cell padding to reduce row height
     lv_obj_align(screen5_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen5_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -5627,7 +5646,8 @@ void create_screen_6(void) {
     lv_obj_set_style_bg_color(screen6_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen6_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen6_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen6_timer_table, &lv_font_montserrat_26, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen6_timer_table, &lv_font_montserrat_28, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(screen6_timer_table, 5, LV_PART_ITEMS);  // 5px cell padding to reduce row height
     lv_obj_align(screen6_timer_table, LV_ALIGN_TOP_MID, 0, 270);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen6_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -5719,7 +5739,8 @@ void create_screen_7(void) {
     lv_obj_set_style_bg_color(screen7_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen7_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen7_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen7_timer_table, &lv_font_montserrat_26, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen7_timer_table, &lv_font_montserrat_28, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(screen7_timer_table, 5, LV_PART_ITEMS);  // 5px cell padding to reduce row height
     lv_obj_align(screen7_timer_table, LV_ALIGN_TOP_MID, 0, 270);  // Centered horizontally, same vertical position
     lv_obj_clear_flag(screen7_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -5818,7 +5839,8 @@ void create_screen_8(void) {
     lv_obj_set_style_bg_color(screen8_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
     lv_obj_set_style_border_color(screen8_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen8_timer_table, 3, LV_PART_ITEMS);  // Thick black border
-    lv_obj_set_style_text_font(screen8_timer_table, &lv_font_montserrat_26, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(screen8_timer_table, &lv_font_montserrat_28, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(screen8_timer_table, 5, LV_PART_ITEMS);  // 5px cell padding to reduce row height
     lv_obj_align(screen8_timer_table, LV_ALIGN_TOP_MID, 0, 330);  // Same position as screens 3,4,5
     lv_obj_clear_flag(screen8_timer_table, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -5962,7 +5984,7 @@ void create_screen_18(void) {
 
     // Labels above table (table at y=110, ~100px tall)
     lv_obj_t* title = lv_label_create(screen_18);
-    lv_label_set_text(title, "Connection failed or lost with M2 V4.1"); //update ver number here too
+    lv_label_set_text(title, "Connection failed or lost with M2 V4.3"); //update ver number here too
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
