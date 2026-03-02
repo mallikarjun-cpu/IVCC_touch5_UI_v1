@@ -443,8 +443,8 @@ void update_charging_control() {
     
     // Temperature check: Monitor temp1 and temp2 during charging states
     // Convert from 0.01°C units to Celsius
-    float temp1_celsius = sensorData.temp1 / 100.0f;
-    float temp2_celsius = sensorData.temp2 / 100.0f;
+    float temp1_celsius = sensorData.temp1 / 100.0f; //motor temp
+    float temp2_celsius = sensorData.temp2 / 100.0f; //gcu gen temp
     
     // Check if either temperature exceeds threshold
     if (temp1_celsius > MAX_TEMP_THRESHOLD || temp2_celsius > MAX_TEMP_THRESHOLD) {
@@ -2040,7 +2040,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW 充電器 v4.3");
+    lv_label_set_text(title, "GCU 3kW 充電器 v4.4");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &arjunsJapFont_30, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
@@ -2182,7 +2182,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW 充電器 v4.3");
+    lv_label_set_text(title, "GCU 3kW 充電器 v4.4");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &arjunsJapFont_28, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2313,8 +2313,8 @@ void create_screen_2(void) {
     lv_obj_set_style_bg_color(screen2_confirm_agree_btn, lv_color_hex(0x00AA00), LV_PART_MAIN);  // Green
     lv_obj_add_event_cb(screen2_confirm_agree_btn, screen2_confirm_agree_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_t *screen2_agree_label = lv_label_create(screen2_confirm_agree_btn);
-    lv_label_set_text(screen2_agree_label, "同意");
-    lv_obj_set_style_text_font(screen2_agree_label, &arjunsJapFont_26, LV_PART_MAIN);
+    lv_label_set_text(screen2_agree_label, "確認");
+    lv_obj_set_style_text_font(screen2_agree_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_center(screen2_agree_label);
 
     // CHANGE button
@@ -2324,8 +2324,8 @@ void create_screen_2(void) {
     lv_obj_set_style_bg_color(screen2_confirm_change_btn, lv_color_hex(0xFF6600), LV_PART_MAIN);  // Orange
     lv_obj_add_event_cb(screen2_confirm_change_btn, screen2_confirm_change_event_handler, LV_EVENT_CLICKED, NULL);
     lv_obj_t *screen2_change_label = lv_label_create(screen2_confirm_change_btn);
-    lv_label_set_text(screen2_change_label, "変更");
-    lv_obj_set_style_text_font(screen2_change_label, &arjunsJapFont_26, LV_PART_MAIN);
+    lv_label_set_text(screen2_change_label, "戻る");
+    lv_obj_set_style_text_font(screen2_change_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_center(screen2_change_label);
 
     // Note: Screen loading is handled by switch_to_screen()
@@ -2389,7 +2389,7 @@ void create_screen_3(void) {
     lv_table_set_col_width(screen3_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
     lv_table_set_cell_value(screen3_timer_table, 0, 0, "総時間");
     lv_table_set_cell_value(screen3_timer_table, 0, 1, "");
-    lv_table_set_cell_value(screen3_timer_table, 0, 2, "充電(Ah)");
+    lv_table_set_cell_value(screen3_timer_table, 0, 2, "充電量 (Ah)");
     lv_table_set_cell_value(screen3_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen3_timer_table, 1, 1, "");
     lv_table_set_cell_value(screen3_timer_table, 1, 2, "0.0");
@@ -2411,7 +2411,7 @@ void create_screen_3(void) {
     lv_obj_clear_flag(screen3_emergency_stop_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t* screen3_emergency_stop_label = lv_label_create(screen3_emergency_stop_btn);
     lv_label_set_text(screen3_emergency_stop_label, "緊急停止");
-    lv_obj_set_style_text_font(screen3_emergency_stop_label, &arjunsJapFont_26, LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen3_emergency_stop_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen3_emergency_stop_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);  // White text
     lv_obj_center(screen3_emergency_stop_label);
 
@@ -2473,7 +2473,7 @@ void create_screen_4(void) {
     lv_table_set_col_width(screen4_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
     lv_table_set_cell_value(screen4_timer_table, 0, 0, "総時間");
     lv_table_set_cell_value(screen4_timer_table, 0, 1, "");
-    lv_table_set_cell_value(screen4_timer_table, 0, 2, "充電(Ah)");
+    lv_table_set_cell_value(screen4_timer_table, 0, 2, "充電量 (Ah)");
     lv_table_set_cell_value(screen4_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen4_timer_table, 1, 1, "");
     lv_table_set_cell_value(screen4_timer_table, 1, 2, "0.0");
@@ -2555,8 +2555,8 @@ void create_screen_5(void) {
     lv_table_set_col_width(screen5_timer_table, 1, 200);
     lv_table_set_col_width(screen5_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
     lv_table_set_cell_value(screen5_timer_table, 0, 0, "総時間");
-    lv_table_set_cell_value(screen5_timer_table, 0, 1, "残");
-    lv_table_set_cell_value(screen5_timer_table, 0, 2, "充電(Ah)");
+    lv_table_set_cell_value(screen5_timer_table, 0, 1, "残り時間");
+    lv_table_set_cell_value(screen5_timer_table, 0, 2, "充電量 (Ah)");
     lv_table_set_cell_value(screen5_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen5_timer_table, 1, 1, "00:00");
     lv_table_set_cell_value(screen5_timer_table, 1, 2, "0.0");
@@ -2631,8 +2631,8 @@ void create_screen_6(void) {
     lv_table_set_col_width(screen6_timer_table, 1, 200);
     lv_table_set_col_width(screen6_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
     lv_table_set_cell_value(screen6_timer_table, 0, 0, "総時間");
-    lv_table_set_cell_value(screen6_timer_table, 0, 1, "Remaining");
-    lv_table_set_cell_value(screen6_timer_table, 0, 2, "充電(Ah)");
+    lv_table_set_cell_value(screen6_timer_table, 0, 1, "残り時間");
+    lv_table_set_cell_value(screen6_timer_table, 0, 2, "充電量 (Ah)");
     lv_table_set_cell_value(screen6_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen6_timer_table, 1, 1, "00:00");
     lv_table_set_cell_value(screen6_timer_table, 1, 2, "0.0");
@@ -2725,7 +2725,7 @@ void create_screen_7(void) {
     lv_table_set_col_width(screen7_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
     lv_table_set_cell_value(screen7_timer_table, 0, 0, "総時間");
     lv_table_set_cell_value(screen7_timer_table, 0, 1, "");
-    lv_table_set_cell_value(screen7_timer_table, 0, 2, "充電(Ah)");
+    lv_table_set_cell_value(screen7_timer_table, 0, 2, "充電量 (Ah)");
     lv_table_set_cell_value(screen7_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen7_timer_table, 1, 1, "");
     lv_table_set_cell_value(screen7_timer_table, 1, 2, "0.0");
@@ -2825,8 +2825,8 @@ void create_screen_8(void) {
     lv_table_set_col_width(screen8_timer_table, 1, 200);
     lv_table_set_col_width(screen8_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
     lv_table_set_cell_value(screen8_timer_table, 0, 0, "総時間");
-    lv_table_set_cell_value(screen8_timer_table, 0, 1, "残");
-    lv_table_set_cell_value(screen8_timer_table, 0, 2, "充電(Ah)");
+    lv_table_set_cell_value(screen8_timer_table, 0, 1, "残り時間");
+    lv_table_set_cell_value(screen8_timer_table, 0, 2, "充電量 (Ah)");
     lv_table_set_cell_value(screen8_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen8_timer_table, 1, 1, "00:00");
     lv_table_set_cell_value(screen8_timer_table, 1, 2, "0.0");
@@ -2978,13 +2978,13 @@ void create_screen_18(void) {
 
     // Labels above table (table at y=110, ~100px tall)
     lv_obj_t* title = lv_label_create(screen_18);
-    lv_label_set_text(title, "Connection failed or lost with M2 V4.3"); //update ver number here too
+    lv_label_set_text(title, "Connection failed or lost with M2 V4.4"); //update ver number here too
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
 
     lv_obj_t* msg = lv_label_create(screen_18);
-    lv_label_set_text(msg, "接続開放、モーター停止");
+    lv_label_set_text(msg, "Error 18、モーター停止");
     lv_obj_set_style_text_color(msg, lv_color_hex(0x8B0000), LV_PART_MAIN);
     lv_obj_set_style_text_font(msg, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 285);
@@ -3006,8 +3006,7 @@ void create_screen_18(void) {
     lv_label_set_text(screen18_rtc_time_label, "M2 時間: -- --");
     lv_obj_set_style_text_font(screen18_rtc_time_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen18_rtc_time_label, lv_color_hex(0x000000), LV_PART_MAIN);
-    //lv_obj_align(screen18_rtc_time_label, LV_ALIGN_TOP_LEFT, 12, 330);  // 20px below table (110 + ~100 + 20)
-    lv_obj_align(screen18_rtc_time_label, LV_ALIGN_TOP_MID, 0, 350);  // screen center below table
+    lv_obj_align(screen18_rtc_time_label, LV_ALIGN_TOP_MID, 0, 390);  // screen center below table
 
     Serial.println("[SCREEN] Screen 18 (M2 connection lost) created successfully");
 }
@@ -5049,7 +5048,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v4.3");
+    lv_label_set_text(title, "GCU 3kW Charger v4.4");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
@@ -5190,7 +5189,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v4.3");
+    lv_label_set_text(title, "GCU 3kW Charger v4.4");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -5984,7 +5983,7 @@ void create_screen_18(void) {
 
     // Labels above table (table at y=110, ~100px tall)
     lv_obj_t* title = lv_label_create(screen_18);
-    lv_label_set_text(title, "Connection failed or lost with M2 V4.3"); //update ver number here too
+    lv_label_set_text(title, "Connection failed or lost with M2 V4.4"); //update ver number here too
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
