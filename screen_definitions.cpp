@@ -15,6 +15,7 @@
 #include "lvgl_v8_port.h"
 #include "rs485_vfdComs.h"
 #include <Arduino.h>
+#include <string.h>
 #include <esp_heap_caps.h>
 
 // External sensor data
@@ -89,10 +90,8 @@ static float accumulated_ah = 0.0f;  // Accumulated Ah (default 0.0)
 static unsigned long last_ah_update_time = 0;  // Last time Ah was updated (for rate limiting)
 static unsigned long last_rtc_update_time = 0;  // Last time RTC time was updated (for rate limiting, 2Hz = 500ms)
 
-// Max value tracking during charge
-static float max_current_during_charge = 0.0f;
-static float max_voltage_during_charge = 0.0f;
-static uint32_t current_charge_serial = 0;  // Serial number for current charge cycle
+// Charge log record (filled at start, updated during charge, completed at stop)
+static charge_log_record_t current_charge_log;
 
 // Log number for SD card display
 static int32_t log_num_sdhc = -1;  // Latest complete log number (default -1)
@@ -487,8 +486,11 @@ void update_charging_control() {
         
         // Log charge complete
         if (sd_logging_initialized) {
-            logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
-                             final_charging_time_ms, accumulated_ah, charge_stop_reason);
+            current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
         }
         
         // STEP 5: Set flag to send stop command after screen 7 loads
@@ -542,8 +544,11 @@ void update_charging_control() {
             }
             charge_stop_reason = CHARGE_STOP_BATTERY_DISCONNECTED;
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+                current_charge_log.end_volt = sensorData.volt;
+                current_charge_log.total_time_ms = final_charging_time_ms;
+                current_charge_log.ah_final = accumulated_ah;
+                current_charge_log.stop_reason = charge_stop_reason;
+                logChargeComplete(&current_charge_log);
             }
             current_flow_start = false;
             pending_stop_command = true;
@@ -569,8 +574,11 @@ void update_charging_control() {
             }
             charge_stop_reason = CHARGE_STOP_VOLT_OR_CURRENT_ERROR;
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
             }
             current_flow_start = false;
             pending_stop_command = true;
@@ -623,8 +631,11 @@ void update_charging_control() {
             
             // Log charge complete
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
             }
             
 // Transition to complete state
@@ -682,8 +693,11 @@ void update_charging_control() {
             }
             charge_stop_reason = CHARGE_STOP_BATTERY_DISCONNECTED;
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+                current_charge_log.end_volt = sensorData.volt;
+                current_charge_log.total_time_ms = final_charging_time_ms;
+                current_charge_log.ah_final = accumulated_ah;
+                current_charge_log.stop_reason = charge_stop_reason;
+                logChargeComplete(&current_charge_log);
             }
             current_flow_start = false;
             pending_stop_command = true;
@@ -750,8 +764,11 @@ void update_charging_control() {
                 
                 // Log charge complete
                 if (sd_logging_initialized) {
-                    logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
-                                     final_charging_time_ms, accumulated_ah, charge_stop_reason);
+current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
                 }
                 
                 // Set flag to send stop command after screen 7 loads
@@ -872,8 +889,11 @@ void update_charging_control() {
             }
             charge_stop_reason = CHARGE_STOP_BATTERY_DISCONNECTED;
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+                current_charge_log.end_volt = sensorData.volt;
+                current_charge_log.total_time_ms = final_charging_time_ms;
+                current_charge_log.ah_final = accumulated_ah;
+                current_charge_log.stop_reason = charge_stop_reason;
+                logChargeComplete(&current_charge_log);
             }
             current_flow_start = false;
             pending_stop_command = true;
@@ -964,8 +984,11 @@ void update_charging_control() {
             
             // Log charge complete
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
             }
             
             current_app_state = STATE_CHARGING_COMPLETE;
@@ -994,8 +1017,11 @@ void update_charging_control() {
             }
             charge_stop_reason = CHARGE_STOP_BATTERY_DISCONNECTED;
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+                current_charge_log.end_volt = sensorData.volt;
+                current_charge_log.total_time_ms = final_charging_time_ms;
+                current_charge_log.ah_final = accumulated_ah;
+                current_charge_log.stop_reason = charge_stop_reason;
+                logChargeComplete(&current_charge_log);
             }
             current_flow_start = false;
             pending_stop_command = true;
@@ -1058,8 +1084,11 @@ void update_charging_control() {
             
             // Log charge complete
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
             }
             
             // Transition to complete state
@@ -1562,12 +1591,16 @@ void update_table_values() {
 
     // Update max values during charge (non-blocking)
     if (charging_start_time > 0 && !charging_complete) {
-        if (sensorData.curr > max_current_during_charge) {
-            max_current_during_charge = sensorData.curr;
+        if (sensorData.curr > current_charge_log.max_curr) {
+            current_charge_log.max_curr = sensorData.curr;
         }
-        if (sensorData.volt > max_voltage_during_charge) {
-            max_voltage_during_charge = sensorData.volt;
+        if (sensorData.volt > current_charge_log.max_volt) {
+            current_charge_log.max_volt = sensorData.volt;
         }
+        float t1 = sensorData.temp1 / 100.0f;
+        float t2 = sensorData.temp2 / 100.0f;
+        if (t1 > current_charge_log.max_t1_celsius) current_charge_log.max_t1_celsius = t1;
+        if (t2 > current_charge_log.max_t2_celsius) current_charge_log.max_t2_celsius = t2;
     }
 
     if (data_table != nullptr) {
@@ -1858,16 +1891,24 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         accumulated_ah = 0.0f;
         last_ah_update_time = millis();
         
-        // Reset max tracking variables
-        max_current_during_charge = 0.0f;
-        max_voltage_during_charge = 0.0f;
+        // Reset and fill charge log record for this cycle
+        memset(&current_charge_log, 0, sizeof(current_charge_log));
+        current_charge_log.serial = getNextSerialNumber();
+        current_charge_log.start_volt = (sensorData.volt > 0.0f) ? sensorData.volt : 0.0f;
+        {
+            String name = selected_battery_profile->getBatteryName();
+            strncpy(current_charge_log.battery_name, name.c_str(), CHARGE_LOG_NAME_MAX - 1);
+            current_charge_log.battery_name[CHARGE_LOG_NAME_MAX - 1] = '\0';
+        }
+        current_charge_log.v = selected_battery_profile->getRatedVoltage();
+        current_charge_log.ah = selected_battery_profile->getRatedAh();
+        current_charge_log.tc = selected_battery_profile->getConstCurrent();
+        current_charge_log.tv = selected_battery_profile->getCutoffVoltage();
         
         // Log charge start
         if (sd_logging_initialized && selected_battery_profile != nullptr) {
-            current_charge_serial = getNextSerialNumber();
-            if (logChargeStart(current_charge_serial, selected_battery_profile)) {
-                // Update log_num_sdhc after successful log write
-                log_num_sdhc = (int32_t)current_charge_serial;
+            if (logChargeStart(&current_charge_log)) {
+                log_num_sdhc = (int32_t)current_charge_log.serial;
                 // Update table display immediately
                 if (data_table != nullptr) {
                     lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
@@ -1955,8 +1996,11 @@ void emergency_stop_event_handler(lv_event_t * e) {
         
         // Log charge complete
         if (sd_logging_initialized) {
-            logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
-                             final_charging_time_ms, accumulated_ah, charge_stop_reason);
+            current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
         }
         
         // Set flag to send stop command after screen 7 loads
@@ -3022,6 +3066,7 @@ void create_screen_18(void) {
 #include "lvgl_v8_port.h"
 #include "rs485_vfdComs.h"
 #include <Arduino.h>
+#include <string.h>
 #include <esp_heap_caps.h>
 
 // External sensor data
@@ -3096,10 +3141,8 @@ static float accumulated_ah = 0.0f;  // Accumulated Ah (default 0.0)
 static unsigned long last_ah_update_time = 0;  // Last time Ah was updated (for rate limiting)
 static unsigned long last_rtc_update_time = 0;  // Last time RTC time was updated (for rate limiting, 2Hz = 500ms)
 
-// Max value tracking during charge
-static float max_current_during_charge = 0.0f;
-static float max_voltage_during_charge = 0.0f;
-static uint32_t current_charge_serial = 0;  // Serial number for current charge cycle
+// Charge log record (filled at start, updated during charge, completed at stop)
+static charge_log_record_t current_charge_log;
 
 // Log number for SD card display
 static int32_t log_num_sdhc = -1;  // Latest complete log number (default -1)
@@ -3494,8 +3537,11 @@ void update_charging_control() {
         
         // Log charge complete
         if (sd_logging_initialized) {
-            logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
-                             final_charging_time_ms, accumulated_ah, charge_stop_reason);
+            current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
         }
         
         // STEP 5: Set flag to send stop command after screen 7 loads
@@ -3549,8 +3595,11 @@ void update_charging_control() {
             }
             charge_stop_reason = CHARGE_STOP_BATTERY_DISCONNECTED;
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+                current_charge_log.end_volt = sensorData.volt;
+                current_charge_log.total_time_ms = final_charging_time_ms;
+                current_charge_log.ah_final = accumulated_ah;
+                current_charge_log.stop_reason = charge_stop_reason;
+                logChargeComplete(&current_charge_log);
             }
             current_flow_start = false;
             pending_stop_command = true;
@@ -3576,8 +3625,11 @@ void update_charging_control() {
             }
             charge_stop_reason = CHARGE_STOP_VOLT_OR_CURRENT_ERROR;
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
             }
             current_flow_start = false;
             pending_stop_command = true;
@@ -3630,8 +3682,11 @@ void update_charging_control() {
             
             // Log charge complete
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
             }
             
 // Transition to complete state
@@ -3689,8 +3744,11 @@ void update_charging_control() {
             }
             charge_stop_reason = CHARGE_STOP_BATTERY_DISCONNECTED;
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+                current_charge_log.end_volt = sensorData.volt;
+                current_charge_log.total_time_ms = final_charging_time_ms;
+                current_charge_log.ah_final = accumulated_ah;
+                current_charge_log.stop_reason = charge_stop_reason;
+                logChargeComplete(&current_charge_log);
             }
             current_flow_start = false;
             pending_stop_command = true;
@@ -3757,8 +3815,11 @@ void update_charging_control() {
                 
                 // Log charge complete
                 if (sd_logging_initialized) {
-                    logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
-                                     final_charging_time_ms, accumulated_ah, charge_stop_reason);
+current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
                 }
                 
                 // Set flag to send stop command after screen 7 loads
@@ -3879,8 +3940,11 @@ void update_charging_control() {
             }
             charge_stop_reason = CHARGE_STOP_BATTERY_DISCONNECTED;
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+                current_charge_log.end_volt = sensorData.volt;
+                current_charge_log.total_time_ms = final_charging_time_ms;
+                current_charge_log.ah_final = accumulated_ah;
+                current_charge_log.stop_reason = charge_stop_reason;
+                logChargeComplete(&current_charge_log);
             }
             current_flow_start = false;
             pending_stop_command = true;
@@ -3971,8 +4035,11 @@ void update_charging_control() {
             
             // Log charge complete
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
             }
             
             current_app_state = STATE_CHARGING_COMPLETE;
@@ -4001,8 +4068,11 @@ void update_charging_control() {
             }
             charge_stop_reason = CHARGE_STOP_BATTERY_DISCONNECTED;
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge,
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+                current_charge_log.end_volt = sensorData.volt;
+                current_charge_log.total_time_ms = final_charging_time_ms;
+                current_charge_log.ah_final = accumulated_ah;
+                current_charge_log.stop_reason = charge_stop_reason;
+                logChargeComplete(&current_charge_log);
             }
             current_flow_start = false;
             pending_stop_command = true;
@@ -4065,8 +4135,11 @@ void update_charging_control() {
             
             // Log charge complete
             if (sd_logging_initialized) {
-                logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
-                                 final_charging_time_ms, accumulated_ah, charge_stop_reason);
+current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
             }
             
             // Transition to complete state
@@ -4570,12 +4643,16 @@ void update_table_values() {
 
     // Update max values during charge (non-blocking)
     if (charging_start_time > 0 && !charging_complete) {
-        if (sensorData.curr > max_current_during_charge) {
-            max_current_during_charge = sensorData.curr;
+        if (sensorData.curr > current_charge_log.max_curr) {
+            current_charge_log.max_curr = sensorData.curr;
         }
-        if (sensorData.volt > max_voltage_during_charge) {
-            max_voltage_during_charge = sensorData.volt;
+        if (sensorData.volt > current_charge_log.max_volt) {
+            current_charge_log.max_volt = sensorData.volt;
         }
+        float t1 = sensorData.temp1 / 100.0f;
+        float t2 = sensorData.temp2 / 100.0f;
+        if (t1 > current_charge_log.max_t1_celsius) current_charge_log.max_t1_celsius = t1;
+        if (t2 > current_charge_log.max_t2_celsius) current_charge_log.max_t2_celsius = t2;
     }
 
     if (data_table != nullptr) {
@@ -4866,16 +4943,24 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         accumulated_ah = 0.0f;
         last_ah_update_time = millis();
         
-        // Reset max tracking variables
-        max_current_during_charge = 0.0f;
-        max_voltage_during_charge = 0.0f;
+        // Reset and fill charge log record for this cycle
+        memset(&current_charge_log, 0, sizeof(current_charge_log));
+        current_charge_log.serial = getNextSerialNumber();
+        current_charge_log.start_volt = (sensorData.volt > 0.0f) ? sensorData.volt : 0.0f;
+        {
+            String name = selected_battery_profile->getBatteryName();
+            strncpy(current_charge_log.battery_name, name.c_str(), CHARGE_LOG_NAME_MAX - 1);
+            current_charge_log.battery_name[CHARGE_LOG_NAME_MAX - 1] = '\0';
+        }
+        current_charge_log.v = selected_battery_profile->getRatedVoltage();
+        current_charge_log.ah = selected_battery_profile->getRatedAh();
+        current_charge_log.tc = selected_battery_profile->getConstCurrent();
+        current_charge_log.tv = selected_battery_profile->getCutoffVoltage();
         
         // Log charge start
         if (sd_logging_initialized && selected_battery_profile != nullptr) {
-            current_charge_serial = getNextSerialNumber();
-            if (logChargeStart(current_charge_serial, selected_battery_profile)) {
-                // Update log_num_sdhc after successful log write
-                log_num_sdhc = (int32_t)current_charge_serial;
+            if (logChargeStart(&current_charge_log)) {
+                log_num_sdhc = (int32_t)current_charge_log.serial;
                 // Update table display immediately
                 if (data_table != nullptr) {
                     lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
@@ -4963,8 +5048,11 @@ void emergency_stop_event_handler(lv_event_t * e) {
         
         // Log charge complete
         if (sd_logging_initialized) {
-            logChargeComplete(max_voltage_during_charge, max_current_during_charge, 
-                             final_charging_time_ms, accumulated_ah, charge_stop_reason);
+            current_charge_log.end_volt = sensorData.volt;
+            current_charge_log.total_time_ms = final_charging_time_ms;
+            current_charge_log.ah_final = accumulated_ah;
+            current_charge_log.stop_reason = charge_stop_reason;
+            logChargeComplete(&current_charge_log);
         }
         
         // Set flag to send stop command after screen 7 loads

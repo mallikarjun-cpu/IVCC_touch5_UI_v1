@@ -19,8 +19,28 @@
 extern bool sd_logging_initialized;
 
 // ============================================================================
-// Charge Logging Functions
+// Charge log record (single charge cycle, filled at start and completion)
 // ============================================================================
+// Battery name is UTF-8 (e.g. Japanese). Log viewer: open file with encoding='utf-8'.
+#define CHARGE_LOG_NAME_MAX 96  // UTF-8 bytes
+
+typedef struct charge_log_record {
+    uint32_t serial;
+    float start_volt;
+    char battery_name[CHARGE_LOG_NAME_MAX];
+    uint16_t v;
+    uint16_t ah;
+    float tc;
+    float tv;
+    float end_volt;
+    float max_volt;
+    float max_curr;
+    float max_t1_celsius;
+    float max_t2_celsius;
+    unsigned long total_time_ms;
+    float ah_final;
+    charge_stop_reason_t stop_reason;
+} charge_log_record_t;
 
 // Initialize charge logging (check/create charge_log.dat file)
 // Returns true if successful, false otherwise
@@ -30,15 +50,16 @@ bool initChargeLogging();
 // Returns next serial number (starts at 1 if file is empty)
 uint32_t getNextSerialNumber();
 
-// Log charge start event
-// Writes: serial_num,timestamp,type,v,ah,tc,tv (no newline)
-// Returns true if successful, false otherwise
-bool logChargeStart(uint32_t serial, BatteryType* profile);
+// Log charge start event (writes first part of line, no newline)
+// Record must have: serial, start_volt, battery_name, v, ah, tc, tv set.
+// CSV: serial,start_ts,start_volt,"battery_name",v,ah,tc,tv
+bool logChargeStart(const charge_log_record_t* record);
 
-// Log charge complete/stop event
-// Appends: ,max_voltage,max_current,total_time_ms,ah_final,charge_stop_reason\n
-// Returns true if successful, false otherwise
-bool logChargeComplete(float max_volt, float max_curr, unsigned long total_time, float ah, charge_stop_reason_t stop_reason);
+// Log charge complete/stop event (appends rest of line + newline)
+// Record must have: end_volt, max_volt, max_curr, max_t1_celsius, max_t2_celsius,
+// total_time_ms, ah_final, stop_reason set. end_ts is taken at write time.
+// Appends: ,end_ts,end_volt,max_volt,max_curr,total_time_ms,ah_final,stop_reason,max_t1,max_t2\n
+bool logChargeComplete(const charge_log_record_t* record);
 
 // ============================================================================
 // Screen Logging Functions (Simple logging without NTP/RTC)

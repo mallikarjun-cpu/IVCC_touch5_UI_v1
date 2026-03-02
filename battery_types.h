@@ -69,9 +69,6 @@ public:
     }
 };
 
-// v4.60: Helper function to get battery chemistry name from profile
-const char* getBatteryChemistryName(BatteryType *profile);
-
 // ============================================================================
 // Battery Profile Manager
 // ============================================================================

@@ -1,6 +1,5 @@
 #include "sd_logging.h"
 #include <SD.h>
-#include "battery_types.h"
 #include "screen_definitions.h"
 
 // External time data from M2
@@ -185,17 +184,6 @@ String getTimestampString() {
     return String(timestamp);
 }
 
-// Get battery chemistry string
-String getBatteryTypeString(BatteryType* profile) {
-    if (!profile) return "UNK";
-    
-    BatteryChemistry chem = profile->getChemistry();
-    if (chem == LITHIUM) return "Li";
-    if (chem == LEAD_ACID) return "LA";
-    if (chem == LIFEPO4) return "LFP";
-    return "UNK";
-}
-
 // Get charge stop reason string
 String getChargeStopReasonString(charge_stop_reason_t reason) {
     switch (reason) {
@@ -222,14 +210,14 @@ String getChargeStopReasonString(charge_stop_reason_t reason) {
 }
 
 // Log charge start event
-bool logChargeStart(uint32_t serial, BatteryType* profile) {
+bool logChargeStart(const charge_log_record_t* record) {
     if (!sd_logging_initialized) {
         Serial.println("[SD_LOG] SD logging not initialized, cannot log charge start");
         return false;
     }
 
-    if (!profile) {
-        Serial.println("[SD_LOG] Battery profile is null, cannot log charge start");
+    if (!record) {
+        Serial.println("[SD_LOG] Charge log record is null, cannot log charge start");
         return false;
     }
 
@@ -239,64 +227,75 @@ bool logChargeStart(uint32_t serial, BatteryType* profile) {
         return false;
     }
 
-    // Format: serial_num,timestamp,type,v,ah,tc,tv
-    String timestamp = getTimestampString();
-    String type = getBatteryTypeString(profile);
-    uint16_t v = profile->getRatedVoltage();
-    uint16_t ah = profile->getRatedAh();
-    float tc = profile->getConstCurrent();
-    float tv = profile->getCutoffVoltage();
-
-    // Write start data (no newline, no closing comma)
-    file.print(serial);
+    // CSV: serial,start_ts,start_volt,"battery_name",v,ah,tc,tv (no newline)
+    // Battery name quoted so commas/UTF-8 (e.g. Japanese) are safe
+    String start_ts = getTimestampString();
+    file.print(record->serial);
     file.print(",");
-    file.print(timestamp);
+    file.print(start_ts);
     file.print(",");
-    file.print(type);
+    file.print(record->start_volt, 1);
+    file.print(",\"");
+    file.print(record->battery_name);
+    file.print("\",");
+    file.print(record->v);
     file.print(",");
-    file.print(v);
+    file.print(record->ah);
     file.print(",");
-    file.print(ah);
+    file.print(record->tc, 1);
     file.print(",");
-    file.print(tc, 1);
-    file.print(",");
-    file.print(tv, 1);
+    file.print(record->tv, 1);
 
     file.close();
-    Serial.printf("[SD_LOG] Charge start logged: serial=%lu, type=%s, v=%d, ah=%d, tc=%.1f, tv=%.1f\n",
-                  serial, type.c_str(), v, ah, tc, tv);
+    Serial.printf("[SD_LOG] Charge start logged: serial=%lu, start_volt=%.1f, name=%s\n",
+                  (unsigned long)record->serial, record->start_volt, record->battery_name);
     return true;
 }
 
 // Log charge complete/stop event
-bool logChargeComplete(float max_volt, float max_curr, unsigned long total_time, float ah, charge_stop_reason_t stop_reason) {
+bool logChargeComplete(const charge_log_record_t* record) {
     if (!sd_logging_initialized) {
         Serial.println("[SD_LOG] SD logging not initialized, cannot log charge complete");
         return false;
     }
 
+    if (!record) {
+        Serial.println("[SD_LOG] Charge log record is null, cannot log charge complete");
+        return false;
+    }
+
     File file = SD.open(CHARGE_LOG_FILE, FILE_APPEND);
     if (!file) {
         Serial.println("[SD_LOG] Failed to open charge_log.dat for appending");
         return false;
     }
 
-    // Format: ,max_voltage,max_current,total_time_ms,ah_final,charge_stop_reason\n
+    // Append: ,end_ts,end_volt,max_volt,max_curr,total_time_ms,ah_final,stop_reason,max_t1,max_t2\n
+    String end_ts = getTimestampString();
     file.print(",");
-    file.print(max_volt, 1);
+    file.print(end_ts);
     file.print(",");
-    file.print(max_curr, 1);
+    file.print(record->end_volt, 1);
     file.print(",");
-    file.print(total_time);
+    file.print(record->max_volt, 1);
     file.print(",");
-    file.print(ah, 1);
+    file.print(record->max_curr, 1);
     file.print(",");
-    file.print(getChargeStopReasonString(stop_reason));
+    file.print(record->total_time_ms);
+    file.print(",");
+    file.print(record->ah_final, 1);
+    file.print(",");
+    file.print(getChargeStopReasonString(record->stop_reason));
+    file.print(",");
+    file.print(record->max_t1_celsius, 1);
+    file.print(",");
+    file.print(record->max_t2_celsius, 1);
     file.print("\n");
 
     file.close();
-    Serial.printf("[SD_LOG] Charge complete logged: max_volt=%.1f, max_curr=%.1f, time=%lu, ah=%.1f, reason=%s\n",
-                  max_volt, max_curr, total_time, ah, getChargeStopReasonString(stop_reason).c_str());
+    Serial.printf("[SD_LOG] Charge complete logged: end_volt=%.1f, max_volt=%.1f, max_t1=%.1f, max_t2=%.1f, reason=%s\n",
+                  record->end_volt, record->max_volt, record->max_t1_celsius, record->max_t2_celsius,
+                  getChargeStopReasonString(record->stop_reason).c_str());
     return true;
 }
 

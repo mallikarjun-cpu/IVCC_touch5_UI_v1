@@ -3,22 +3,6 @@
 #include <lvgl.h>
 
 // ============================================================================
-// Helper Functions Implementation
-// ============================================================================
-
-// v4.60: Helper function to get battery chemistry name from profile
-const char* getBatteryChemistryName(BatteryType *profile) {
-    if (!profile) return "Unknown";
-
-    switch(profile->getChemistry()) {
-        case LITHIUM:   return "Lithium";
-        case LEAD_ACID: return "Lead Acid";
-        case LIFEPO4:   return "LiFePO4";
-        default:        return "Unknown";
-    }
-}
-
-// ============================================================================
 // Global Battery Profile Manager Instance
 // ============================================================================
 
