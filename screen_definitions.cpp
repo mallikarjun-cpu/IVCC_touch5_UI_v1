@@ -2124,10 +2124,10 @@ void create_screen_1()
         lv_table_set_col_width(data_table, 4, 198);  // Log
 
         // Headers (Row 0) — JAP: 電圧 電流 温度 (回転数|電力) ログ数
-        lv_table_set_cell_value(data_table, 0, 0, "電圧");
-        lv_table_set_cell_value(data_table, 0, 1, "電流");
-        lv_table_set_cell_value(data_table, 0, 2, "温度");
-        lv_table_set_cell_value(data_table, 0, 3, TEST_SCREEN ? "回転数" : "電力");
+        lv_table_set_cell_value(data_table, 0, 0, "電圧(V)");
+        lv_table_set_cell_value(data_table, 0, 1, "電流(A)");
+        lv_table_set_cell_value(data_table, 0, 2, "温度(C)");
+        lv_table_set_cell_value(data_table, 0, 3, TEST_SCREEN ? "回転数" : "電力(W)");
         lv_table_set_cell_value(data_table, 0, 4, "ログ数");
 
         // Values (Row 1)

@@ -9,12 +9,12 @@
 #define Ah_CALCULATION_DEBUG 0  // 1 = print, 0 = print off
 
 // Voltage saturation detection macros (3kW)
-#define VOLTAGE_SATURATION_CHECK_INTERVAL_MS (2 * 60 * 1000)  // xx1: 10 minutes in milliseconds
+#define VOLTAGE_SATURATION_CHECK_INTERVAL_MS (30 * 60 * 1000)  // xx1: 10 minutes in milliseconds
 #define VOLTAGE_SATURATION_CV_DURATION_MS (1 * 60 * 1000)     // xx2: 5 minutes in milliseconds
-#define VOLTAGE_SATURATION_THRESHOLD_V 0.5f                   // 0.5V threshold for saturation detection
+#define VOLTAGE_SATURATION_THRESHOLD_V 0.2f                   // 0.5V threshold for saturation detection
 
 // Precharge timing macros (Screen 3 - Charging Start)
-#define PRECHARGE_TIME_MS (1 * 60 * 1000)  // 3 minutes in milliseconds
+#define PRECHARGE_TIME_MS (1.2 * 60 * 1000)  // 3 minutes in milliseconds
 #define PRECHARGE_AMPS 5.0f                // 2.0 Amps threshold
 // Step 1 safety: current must flow within this time, else volt_or_current error
 #define PRECHARGE_CURRENT_FLOW_TIMEOUT_MS (120 * 1000)  // 59 seconds (precharge can be 1 min)
