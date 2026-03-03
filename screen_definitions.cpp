@@ -96,6 +96,9 @@ static charge_log_record_t current_charge_log;
 // Log number for SD card display
 static int32_t log_num_sdhc = -1;  // Latest complete log number (default -1)
 
+// Present power (V * A), -1 when invalid
+static float present_power = -1.0f;
+
 // Timer table objects for screens 3, 4, 5, 6, 7, 8
 static lv_obj_t* screen3_timer_table = nullptr;
 static lv_obj_t* screen4_timer_table = nullptr;
@@ -1617,14 +1620,21 @@ void update_table_values() {
         lv_table_set_cell_value(data_table, 1, 2,
             String(temp3_celsius, 1).c_str());
 
-        // Update frequency (column 3) - show current RPM
-        float freq_hz = current_frequency / 100.0f;
-        float rpm = VFD_FREQ_TO_RPM(freq_hz);
-        lv_table_set_cell_value(data_table, 1, 3, String((int)rpm).c_str());
-
-        // Update log number (column 4)
-        lv_table_set_cell_value(data_table, 1, 4,
-            String(log_num_sdhc).c_str());
+        // Column 3: RPM if TEST_SCREEN else Power
+        if (TEST_SCREEN) {
+            float freq_hz = current_frequency / 100.0f;
+            float rpm = VFD_FREQ_TO_RPM(freq_hz);
+            lv_table_set_cell_value(data_table, 1, 3, String((int)rpm).c_str());
+        } else {
+            if (sensorData.volt >= 0.0f && sensorData.curr >= 0.0f) {
+                present_power = sensorData.volt * sensorData.curr;
+            } else {
+                present_power = -1.0f;
+            }
+            lv_table_set_cell_value(data_table, 1, 3, (present_power >= 0.0f) ? String(present_power, 1).c_str() : "--");
+        }
+        // Column 4: log number
+        lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
     }
 
     // Unlock LVGL
@@ -1895,6 +1905,7 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         memset(&current_charge_log, 0, sizeof(current_charge_log));
         current_charge_log.serial = getNextSerialNumber();
         current_charge_log.start_volt = (sensorData.volt > 0.0f) ? sensorData.volt : 0.0f;
+        current_charge_log.start_temp3_celsius = sensorData.temp3 / 100.0f;  // temp3 in 0.01°C
         {
             String name = selected_battery_profile->getBatteryName();
             strncpy(current_charge_log.battery_name, name.c_str(), CHARGE_LOG_NAME_MAX - 1);
@@ -2084,7 +2095,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW 充電器 v4.4");
+    lv_label_set_text(title, "GCU 3kW 充電器 v4.6");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &arjunsJapFont_30, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
@@ -2101,7 +2112,7 @@ void create_screen_1()
         // Create table if it doesn't exist
         data_table = lv_table_create(lv_scr_act());  // Create on active screen initially
 
-        // Table properties
+        // Table properties — always 5 cols: Volt, Curr, Temp, (RPM|Power), Log
         lv_table_set_col_cnt(data_table, 5);
         lv_table_set_row_cnt(data_table, 2);  // Exactly 2 rows
 
@@ -2109,15 +2120,14 @@ void create_screen_1()
         lv_table_set_col_width(data_table, 0, 198);  // Volt
         lv_table_set_col_width(data_table, 1, 198);  // Curr
         lv_table_set_col_width(data_table, 2, 198);  // Temp3
-        lv_table_set_col_width(data_table, 3, 198);  // Rpm
-        lv_table_set_col_width(data_table, 4, 198);  // Entry
+        lv_table_set_col_width(data_table, 3, 198);  // RPM or Power
+        lv_table_set_col_width(data_table, 4, 198);  // Log
 
-        // Headers (Row 0) — USE_JAP: 電圧 電流 温度 回転数 ログ数
+        // Headers (Row 0) — JAP: 電圧 電流 温度 (回転数|電力) ログ数
         lv_table_set_cell_value(data_table, 0, 0, "電圧");
         lv_table_set_cell_value(data_table, 0, 1, "電流");
         lv_table_set_cell_value(data_table, 0, 2, "温度");
-        //lv_table_set_cell_value(data_table, 0, 3, "電力");
-        lv_table_set_cell_value(data_table, 0, 3, "回転数");
+        lv_table_set_cell_value(data_table, 0, 3, TEST_SCREEN ? "回転数" : "電力");
         lv_table_set_cell_value(data_table, 0, 4, "ログ数");
 
         // Values (Row 1)
@@ -2226,7 +2236,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW 充電器 v4.4");
+    lv_label_set_text(title, "GCU 3kW 充電器 v4.6");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &arjunsJapFont_28, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -3022,7 +3032,7 @@ void create_screen_18(void) {
 
     // Labels above table (table at y=110, ~100px tall)
     lv_obj_t* title = lv_label_create(screen_18);
-    lv_label_set_text(title, "Connection failed or lost with M2 V4.4"); //update ver number here too
+    lv_label_set_text(title, "Connection failed or lost with M2 V4.6"); //update ver number here too
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
@@ -3146,6 +3156,9 @@ static charge_log_record_t current_charge_log;
 
 // Log number for SD card display
 static int32_t log_num_sdhc = -1;  // Latest complete log number (default -1)
+
+// Present power (V * A), -1 when invalid
+static float present_power = -1.0f;
 
 // Timer table objects for screens 3, 4, 5, 6, 7, 8
 static lv_obj_t* screen3_timer_table = nullptr;
@@ -4669,14 +4682,21 @@ void update_table_values() {
         lv_table_set_cell_value(data_table, 1, 2,
             String(temp3_celsius, 1).c_str());
 
-        // Update frequency (column 3) - show current RPM
-        float freq_hz = current_frequency / 100.0f;
-        float rpm = VFD_FREQ_TO_RPM(freq_hz);
-        lv_table_set_cell_value(data_table, 1, 3, String((int)rpm).c_str());
-
-        // Update log number (column 4)
-        lv_table_set_cell_value(data_table, 1, 4,
-            String(log_num_sdhc).c_str());
+        // Column 3: RPM if TEST_SCREEN else Power
+        if (TEST_SCREEN) {
+            float freq_hz = current_frequency / 100.0f;
+            float rpm = VFD_FREQ_TO_RPM(freq_hz);
+            lv_table_set_cell_value(data_table, 1, 3, String((int)rpm).c_str());
+        } else {
+            if (sensorData.volt >= 0.0f && sensorData.curr >= 0.0f) {
+                present_power = sensorData.volt * sensorData.curr;
+            } else {
+                present_power = -1.0f;
+            }
+            lv_table_set_cell_value(data_table, 1, 3, (present_power >= 0.0f) ? String(present_power, 1).c_str() : "--");
+        }
+        // Column 4: log number
+        lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
     }
 
     // Unlock LVGL
@@ -4947,6 +4967,7 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         memset(&current_charge_log, 0, sizeof(current_charge_log));
         current_charge_log.serial = getNextSerialNumber();
         current_charge_log.start_volt = (sensorData.volt > 0.0f) ? sensorData.volt : 0.0f;
+        current_charge_log.start_temp3_celsius = sensorData.temp3 / 100.0f;  // temp3 in 0.01°C
         {
             String name = selected_battery_profile->getBatteryName();
             strncpy(current_charge_log.battery_name, name.c_str(), CHARGE_LOG_NAME_MAX - 1);
@@ -5136,7 +5157,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v4.4");
+    lv_label_set_text(title, "GCU 3kW Charger v4.6");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
@@ -5153,7 +5174,7 @@ void create_screen_1()
         // Create table if it doesn't exist
         data_table = lv_table_create(lv_scr_act());  // Create on active screen initially
 
-        // Table properties
+        // Table properties — always 5 cols: Volt, Curr, Temp, (RPM|Power), Log
         lv_table_set_col_cnt(data_table, 5);
         lv_table_set_row_cnt(data_table, 2);  // Exactly 2 rows
 
@@ -5161,14 +5182,14 @@ void create_screen_1()
         lv_table_set_col_width(data_table, 0, 198);  // Volt
         lv_table_set_col_width(data_table, 1, 198);  // Curr
         lv_table_set_col_width(data_table, 2, 198);  // Temp3
-        lv_table_set_col_width(data_table, 3, 198);  // Rpm
-        lv_table_set_col_width(data_table, 4, 198);  // Entry
+        lv_table_set_col_width(data_table, 3, 198);  // RPM or Power
+        lv_table_set_col_width(data_table, 4, 198);  // Log
 
-        // Headers (Row 0)
+        // Headers (Row 0) — ENG: Voltage Current Temp (RPM|Power) LOG_num
         lv_table_set_cell_value(data_table, 0, 0, "Voltage");
         lv_table_set_cell_value(data_table, 0, 1, "Current");
         lv_table_set_cell_value(data_table, 0, 2, "Temp");
-        lv_table_set_cell_value(data_table, 0, 3, "RPM");
+        lv_table_set_cell_value(data_table, 0, 3, TEST_SCREEN ? "RPM" : "Power");
         lv_table_set_cell_value(data_table, 0, 4, "LOG_num");
 
         // Values (Row 1)
@@ -5277,7 +5298,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v4.4");
+    lv_label_set_text(title, "GCU 3kW Charger v4.6");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -6071,7 +6092,7 @@ void create_screen_18(void) {
 
     // Labels above table (table at y=110, ~100px tall)
     lv_obj_t* title = lv_label_create(screen_18);
-    lv_label_set_text(title, "Connection failed or lost with M2 V4.4"); //update ver number here too
+    lv_label_set_text(title, "Connection failed or lost with M2 V4.6"); //update ver number here too
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);

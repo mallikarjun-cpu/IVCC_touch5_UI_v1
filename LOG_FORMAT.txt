@@ -1,0 +1,41 @@
+# Charge log format (chglog.dat) for Python log viewer
+# One line per charge. Open file with encoding='utf-8'. Battery name is quoted CSV (may contain commas/UTF-8).
+
+# Column order (no header row in file):
+# 0: serial
+# 1: start_ts (YYYY-MM-DD HH:MM:SS)
+# 2: start_volt
+# 3: start_temp3 (temp3 at charge start, °C)
+# 4: battery_name (quoted string, UTF-8)
+# 5: v (rated V)
+# 6: ah (rated Ah)
+# 7: tc (target current A)
+# 8: tv (cutoff V)
+    end of 1st part write to sd card. (in case of powerloss, log gets broken here)
+# 9: end_ts
+# 10: end_volt
+# 11: max_volt
+# 12: max_curr
+# 13: total_time_ms
+# 14: ah_final
+# 15: stop_reason (COMPLETE|EMERGENCY|VOLT_SAT|...)
+# 16: max_t1 (°C)
+# 17: max_t2 (°C)
+# 18: complete_flag (1 = second part written; 0 or missing = incomplete, e.g. power lost after start)
+    end of 2nd part write to sd card. 
+
+
+# Incomplete lines: if power is lost after logChargeStart but before logChargeComplete, the line has no newline.
+# On next startup the firmware appends \n to close that line, so the next log starts on a new line. Incomplete rows have fewer columns (no end_ts,...,complete_flag).
+
+# One-line format string for parsing:
+LOG_FORMAT = "serial, start_ts, start_volt, start_temp3, \"battery_name\", v, ah, tc, tv, end_ts, end_volt, max_volt, max_curr, total_time_ms, ah_final, stop_reason, max_t1, max_t2, complete_flag"
+
+# Example: read with Python csv module (handles quoted battery_name):
+#   import csv
+#   with open("chglog.dat", "r", encoding="utf-8") as f:
+#       for row in csv.reader(f):
+#           if len(row) >= 19:  # full line (complete)
+#               serial, start_ts, start_volt, start_temp3, battery_name, v, ah, tc, tv, end_ts, end_volt, max_volt, max_curr, total_time_ms, ah_final, stop_reason, max_t1, max_t2, complete_flag = row[0], row[1], float(row[2]), float(row[3]), row[4], int(row[5]), int(row[6]), float(row[7]), float(row[8]), row[9], float(row[10]), float(row[11]), float(row[12]), int(row[13]), float(row[14]), row[15], float(row[16]), float(row[17]), row[18]
+#           elif len(row) >= 9:  # incomplete line (only start part)
+#               serial, start_ts, start_volt, start_temp3, battery_name, v, ah, tc, tv = row[0], row[1], float(row[2]), float(row[3]), row[4], int(row[5]), int(row[6]), float(row[7]), float(row[8])

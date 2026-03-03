@@ -26,6 +26,9 @@
 // CAN/RTC Debug screens macro (0 = hidden for production, 1 = visible for debugging)
 #define CAN_RTC_DEBUG 0  // can, rtc screens hidden for production
 
+// Test screen: 1 = 4th col is RPM, 0 = 4th col is Power. Table always 5 cols: Volt, Curr, Temp, (RPM|Power), Log
+#define TEST_SCREEN 0
+
 // Global screen objects
 extern lv_obj_t* screen_1;
 extern lv_obj_t* screen_2;

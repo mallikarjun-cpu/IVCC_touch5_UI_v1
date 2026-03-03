@@ -24,9 +24,12 @@ extern bool sd_logging_initialized;
 // Battery name is UTF-8 (e.g. Japanese). Log viewer: open file with encoding='utf-8'.
 #define CHARGE_LOG_NAME_MAX 96  // UTF-8 bytes
 
+// Log format (one line per charge, UTF-8): serial, start_ts, start_volt, start_temp3, "battery_name", v, ah, tc, tv, end_ts, end_volt, max_volt, max_curr, total_time_ms, ah_final, stop_reason, max_t1, max_t2, complete_flag (1=second part written; if power lost before complete, line has no newline and startup appends \n to close it)
+
 typedef struct charge_log_record {
     uint32_t serial;
     float start_volt;
+    float start_temp3_celsius;  // temp3 (e.g. room) at charge start
     char battery_name[CHARGE_LOG_NAME_MAX];
     uint16_t v;
     uint16_t ah;
@@ -51,14 +54,15 @@ bool initChargeLogging();
 uint32_t getNextSerialNumber();
 
 // Log charge start event (writes first part of line, no newline)
-// Record must have: serial, start_volt, battery_name, v, ah, tc, tv set.
-// CSV: serial,start_ts,start_volt,"battery_name",v,ah,tc,tv
+// Record must have: serial, start_volt, start_temp3_celsius, battery_name, v, ah, tc, tv set.
+// CSV: serial,start_ts,start_volt,start_temp3,"battery_name",v,ah,tc,tv
 bool logChargeStart(const charge_log_record_t* record);
 
 // Log charge complete/stop event (appends rest of line + newline)
 // Record must have: end_volt, max_volt, max_curr, max_t1_celsius, max_t2_celsius,
 // total_time_ms, ah_final, stop_reason set. end_ts is taken at write time.
-// Appends: ,end_ts,end_volt,max_volt,max_curr,total_time_ms,ah_final,stop_reason,max_t1,max_t2\n
+// Appends: ,end_ts,end_volt,max_volt,max_curr,total_time_ms,ah_final,stop_reason,max_t1,max_t2,complete_flag\n
+// complete_flag=1 when second part written; on startup, if file doesn't end with \n, last line is repaired (append \n) so next log starts on new line.
 bool logChargeComplete(const charge_log_record_t* record);
 
 // ============================================================================

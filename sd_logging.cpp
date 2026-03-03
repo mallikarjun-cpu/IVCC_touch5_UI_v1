@@ -22,7 +22,9 @@ ScreenLogger screenLogger;
 // Charge log file name (in root directory since mkdir() doesn't work with ESP32 SD library)
 // Using shorter name to avoid FAT32 filename issues
 // Note: Leading slash required for ESP32 SD library root directory files
-#define CHARGE_LOG_FILE "/chglog.dat"
+#define CHARGE_LOG_FILE "/chglog_v2.dat"
+
+static void repairIncompleteLastLine();  // forward decl
 
 // Initialize charge logging (check/create charge_log.dat file)
 bool initChargeLogging() {
@@ -116,7 +118,32 @@ bool initChargeLogging() {
     }
 
     Serial.println("[SD_LOG] charge_log.dat file exists");
+    repairIncompleteLastLine();  // if power was lost after start but before complete, close incomplete line with \n
     return true;
+}
+
+// If log file does not end with newline, last write was only charge start (power lost before completion).
+// Append newline so that line is closed and next log starts on a new line.
+static void repairIncompleteLastLine() {
+    if (!SD.exists(CHARGE_LOG_FILE)) return;
+    File file = SD.open(CHARGE_LOG_FILE, FILE_READ);
+    if (!file) return;
+    size_t sz = file.size();
+    if (sz == 0) {
+        file.close();
+        return;
+    }
+    file.seek(sz - 1, SeekSet);
+    char last = (char)file.read();
+    file.close();
+    if (last == '\n') return;  // already complete
+    // Last line incomplete (only start part was written). Close it with newline.
+    File appendFile = SD.open(CHARGE_LOG_FILE, FILE_APPEND);
+    if (appendFile) {
+        appendFile.print("\n");
+        appendFile.close();
+        Serial.println("[SD_LOG] Repaired incomplete last line (appended newline)");
+    }
 }
 
 // Get next serial number from charge_log.dat file
@@ -227,7 +254,7 @@ bool logChargeStart(const charge_log_record_t* record) {
         return false;
     }
 
-    // CSV: serial,start_ts,start_volt,"battery_name",v,ah,tc,tv (no newline)
+    // CSV: serial,start_ts,start_volt,start_temp3,"battery_name",v,ah,tc,tv (no newline)
     // Battery name quoted so commas/UTF-8 (e.g. Japanese) are safe
     String start_ts = getTimestampString();
     file.print(record->serial);
@@ -235,6 +262,8 @@ bool logChargeStart(const charge_log_record_t* record) {
     file.print(start_ts);
     file.print(",");
     file.print(record->start_volt, 1);
+    file.print(",");
+    file.print(record->start_temp3_celsius, 1);
     file.print(",\"");
     file.print(record->battery_name);
     file.print("\",");
@@ -270,7 +299,7 @@ bool logChargeComplete(const charge_log_record_t* record) {
         return false;
     }
 
-    // Append: ,end_ts,end_volt,max_volt,max_curr,total_time_ms,ah_final,stop_reason,max_t1,max_t2\n
+    // Append: ,end_ts,end_volt,...,max_t2,complete_flag\n  (complete_flag=1 so next startup knows line is complete)
     String end_ts = getTimestampString();
     file.print(",");
     file.print(end_ts);
@@ -290,7 +319,7 @@ bool logChargeComplete(const charge_log_record_t* record) {
     file.print(record->max_t1_celsius, 1);
     file.print(",");
     file.print(record->max_t2_celsius, 1);
-    file.print("\n");
+    file.print(",1\n");  // completion flag 1 = second part written; avoids next log appending to same line after power loss
 
     file.close();
     Serial.printf("[SD_LOG] Charge complete logged: end_volt=%.1f, max_volt=%.1f, max_t1=%.1f, max_t2=%.1f, reason=%s\n",
