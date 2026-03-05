@@ -9,15 +9,16 @@
 #define Ah_CALCULATION_DEBUG 0  // 1 = print, 0 = print off
 
 // Voltage saturation detection macros (3kW)
-#define VOLTAGE_SATURATION_CHECK_INTERVAL_MS (30 * 60 * 1000)  // xx1: 10 minutes in milliseconds
-#define VOLTAGE_SATURATION_CV_DURATION_MS (1 * 60 * 1000)     // xx2: 5 minutes in milliseconds
-#define VOLTAGE_SATURATION_THRESHOLD_V 0.2f                   // 0.5V threshold for saturation detection
+#define VOLTAGE_SATURATION_CHECK_INTERVAL_MS (10 * 60 * 1000)  // xx1: 10 minutes in milliseconds
+#define VOLTAGE_SATURATION_CV_DURATION_MS (5 * 60 * 1000)     // xx2: 5 minutes in milliseconds
+#define VOLTAGE_SATURATION_THRESHOLD_V 0.2f                   // 0.2V threshold for saturation detection
 
 // Precharge timing macros (Screen 3 - Charging Start)
-#define PRECHARGE_TIME_MS (1.2 * 60 * 1000)  // 3 minutes in milliseconds
+//#define PRECHARGE_TIME_MS (1.2 * 60 * 1000)  // 3 minutes in milliseconds
+#define PRECHARGE_TIME_MS (5 * 60 * 1000)  // 3 minutes in milliseconds
 #define PRECHARGE_AMPS 5.0f                // 2.0 Amps threshold
 // Step 1 safety: current must flow within this time, else volt_or_current error
-#define PRECHARGE_CURRENT_FLOW_TIMEOUT_MS (120 * 1000)  // 59 seconds (precharge can be 1 min)
+#define PRECHARGE_CURRENT_FLOW_TIMEOUT_MS (45 * 1000)  // 45 seconds (precharge can be 1 min)
 #define PRECHARGE_RPM_LIMIT 3700           // RPM above this in step 1 -> volt_or_current error
 
 // Temperature threshold macro
@@ -26,7 +27,12 @@
 // CAN/RTC Debug screens macro (0 = hidden for production, 1 = visible for debugging)
 #define CAN_RTC_DEBUG 0  // can, rtc screens hidden for production
 
-// Test screen: 1 = 4th col is RPM, 0 = 4th col is Power. Table always 5 cols: Volt, Curr, Temp, (RPM|Power), Log
+// App version string — change here to update version in UI (table col 5 when TEST_SCREEN=0) and setup Serial
+//#define APP_VERSION_STR "4.7" //dev version
+#define APP_VERSION_STR "1.0" //Release version
+
+// Test screen: 1 = 4th col RPM, 5th col Log number (live), show target V/I and motor/GVOLTA temp line.
+//             0 = 4th col Power, 5th col Version (static); target V/I and temp line blank/hidden.
 #define TEST_SCREEN 0
 
 // Global screen objects

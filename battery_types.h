@@ -56,6 +56,12 @@ public:
     float getCutoffVoltage() const { return cutoffVoltage; }
     float getConstCurrent() const { return constCurrent; }
     String getDisplayName() const { return displayName; }
+    // Same format as getDisplayName() but chemistry shown as 鉛 for LEAD_ACID on Japanese UI
+    String getDisplayNameForJapanese() const {
+        String chemStr = (chemistry == LITHIUM) ? "Li" :
+                         (chemistry == LEAD_ACID) ? "鉛" : "LFP";
+        return String(ratedVoltage) + "V " + chemStr + " " + String(ratedAh) + "Ah";
+    }
     String getBatteryName() const { return batteryName; }
 
     // Setters (for manual configuration)

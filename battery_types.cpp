@@ -18,25 +18,27 @@ void initializeBatteryProfiles() {
     //default battery for screen2 , 0volt
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 0, 0, 0.0, 0.0, "default"));
     // 12V Lead Acid batteries (cutoff 16V)
-    batteryProfiles.addProfile(new BatteryType(LIFEPO4, 12, 280, 14.5, 150.0, "Lifpo nishiarai 0.5c"));
-    batteryProfiles.addProfile(new BatteryType(LIFEPO4, 12, 5, 15.1, 150.0, "2] Lifpo nishiarai 0.5c"));
+/*
+    batteryProfiles.addProfile(new BatteryType(LIFEPO4, 12, 280, 14.5, 150.0, "1] Lifpo nishiarai 0.5c"));
+    batteryProfiles.addProfile(new BatteryType(LIFEPO4, 12, 280, 15.1, 150.0, "2] Lifpo nishiarai 0.5c"));
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 20, 16.0, 12.0, "Old Nishiarai 2f"));
-
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 75, 16, 45.0, "[A] 8T 油圧ショベル 75Ah"));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 80, 16, 48.0, "[B] 14T 油圧ショベル 80Ah"));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 115, 16, 70.0, "[C] 20T 油圧ショベル 115Ah"));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 75, 16, 45.0, "[D] 3.5T タイヤショベル 75Ah"));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 160, 16, 96.0, "[E] 11T タイヤショベル 160Ah"));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 195, 16, 117.0, "[F] 18T タイヤショベル 195Ah"));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 80, 16, 48.0, "[G] 4T コンベインドローラー 80Ah"));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 72, 16, 43.0, "[H] 10t タイヤローラー 72Ah"));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 72, 16, 43.0, "[I] 60KVA 発電機 72Ah"));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 80, 16, 48.0, "[J] 150KVA 発電機 80Ah"));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 130, 16, 78.0, "[K] 220KVA 発電機 130Ah"));
+*/
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 75, 16, 45.0, "[A] 8T 油圧ショベル"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 80, 16, 48.0, "[B] 14T 油圧ショベル"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 115, 16, 70.0, "[C] 20T 油圧ショベル"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 75, 16, 45.0, "[D] 3.5T タイヤショベル"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 160, 16, 96.0, "[E] 11T タイヤショベル"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 195, 16, 117.0, "[F] 18T タイヤショベル"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 80, 16, 48.0, "[G] 4T コンベインドローラー"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 72, 16, 43.0, "[H] 10t タイヤローラー"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 72, 16, 43.0, "[I] 60KVA 発電機"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 80, 16, 48.0, "[J] 150KVA 発電機"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 12, 130, 16, 78.0, "[K] 220KVA 発電機"));
+/*
 
     // 24V Lead Acid batteries (cutoff 33.2V) - also used for 28.8V rated hoist batteries
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 24, 10, 33.2, 6.0));
-    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 24, 20, 33.2, 12.0));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 24, 10, 31.2, 6.0, "big Nishiarai 2f"));
+    batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 24, 20, 31.2, 12.0, "big2 Nishiarai 2f"));
 
     // 36V Lead Acid batteries (cutoff 48V)
     batteryProfiles.addProfile(new BatteryType(LEAD_ACID, 36, 10, 48.0, 6.0));
@@ -63,6 +65,8 @@ void initializeBatteryProfiles() {
     // 51V LiFePO4 batteries
     batteryProfiles.addProfile(new BatteryType(LIFEPO4, 51, 280, 58.4, 12.0));
     batteryProfiles.addProfile(new BatteryType(LIFEPO4, 51, 565, 58.4, 12.0));
+
+*/
 
     Serial.print("Battery profiles initialized: ");
     Serial.print(batteryProfiles.getProfileCount());

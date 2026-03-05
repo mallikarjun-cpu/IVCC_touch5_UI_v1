@@ -100,7 +100,7 @@ void setup()
 
     // Create CAN monitoring task (RTOS)
     xTaskCreatePinnedToCore(can_task, "CAN_Task", 4096, NULL, 1, NULL, 1);
-
+    
     //initialise rs485 coms, with uart2 at pin 44,43 as tx,rx at 9600 baud.
     rs485_init();
     delay(100); // Small delay for serial stabilization
@@ -128,7 +128,7 @@ void setup()
     delay(200);
     send_contactor_control(CONTACTOR_OPEN);
     
-    Serial.println("End of setup, setup success! ------ v4.6------  \n -----");
+    Serial.println("End of setup, setup success! ------ v" APP_VERSION_STR "------  \n -----");
 }
 
 void loop()

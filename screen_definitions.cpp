@@ -277,6 +277,11 @@ void switch_to_screen(screen_id_t screen_id) {
             Serial.println("[M2] Stop motor sent");
             send_contactor_control(CONTACTOR_OPEN);
             Serial.println("[M2] Contactor open sent");
+            // Stop charging FSM and clear flags so motor never restarts while on screen 18
+            current_app_state = STATE_EMERGENCY_STOP;
+            charging_complete = true;
+            current_flow_start = false;
+            pending_stop_command = false;
         }
 
         // Lock LVGL for entire switch (move table + load screen). Prevents first-boot overlay
@@ -337,15 +342,21 @@ void switch_to_screen(screen_id_t screen_id) {
             }
         }
 
-        // Set battery details label once on entry to screens 3, 4, 5 (won't change during charge)
+        // Set battery details label once on entry to screens 3, 4, 5 (won't change during charge). TEST_SCREEN 0 = no TV/TC
         if (screen_id == SCREEN_CHARGING_STARTED && screen3_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
                 char details_text[180];
-                sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
-                        selected_battery_profile->getBatteryName().c_str(),
-                        selected_battery_profile->getDisplayName().c_str(),
-                        selected_battery_profile->getCutoffVoltage(),
-                        selected_battery_profile->getConstCurrent());
+                if (TEST_SCREEN) {
+                    sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayNameForJapanese().c_str(),
+                            selected_battery_profile->getCutoffVoltage(),
+                            selected_battery_profile->getConstCurrent());
+                } else {
+                    sprintf(details_text, "選択電池: %s , %s",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayNameForJapanese().c_str());
+                }
                 lv_label_set_text(screen3_battery_details_label, details_text);
             } else {
                 lv_label_set_text(screen3_battery_details_label, "選択電池: なし");
@@ -354,11 +365,17 @@ void switch_to_screen(screen_id_t screen_id) {
         if (screen_id == SCREEN_CHARGING_CC && screen4_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
                 char details_text[180];
-                sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
-                        selected_battery_profile->getBatteryName().c_str(),
-                        selected_battery_profile->getDisplayName().c_str(),
-                        selected_battery_profile->getCutoffVoltage(),
-                        selected_battery_profile->getConstCurrent());
+                if (TEST_SCREEN) {
+                    sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayNameForJapanese().c_str(),
+                            selected_battery_profile->getCutoffVoltage(),
+                            selected_battery_profile->getConstCurrent());
+                } else {
+                    sprintf(details_text, "選択電池: %s , %s",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayNameForJapanese().c_str());
+                }
                 lv_label_set_text(screen4_battery_details_label, details_text);
             } else {
                 lv_label_set_text(screen4_battery_details_label, "選択電池: なし");
@@ -367,11 +384,17 @@ void switch_to_screen(screen_id_t screen_id) {
         if (screen_id == SCREEN_CHARGING_CV && screen5_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
                 char details_text[180];
-                sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
-                        selected_battery_profile->getBatteryName().c_str(),
-                        selected_battery_profile->getDisplayName().c_str(),
-                        selected_battery_profile->getCutoffVoltage(),
-                        selected_battery_profile->getConstCurrent());
+                if (TEST_SCREEN) {
+                    sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayNameForJapanese().c_str(),
+                            selected_battery_profile->getCutoffVoltage(),
+                            selected_battery_profile->getConstCurrent());
+                } else {
+                    sprintf(details_text, "選択電池: %s , %s",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayNameForJapanese().c_str());
+                }
                 lv_label_set_text(screen5_battery_details_label, details_text);
             } else {
                 lv_label_set_text(screen5_battery_details_label, "選択電池: なし");
@@ -381,11 +404,17 @@ void switch_to_screen(screen_id_t screen_id) {
         if (screen_id == SCREEN_CHARGING_COMPLETE && screen6_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
                 char details_text[180];
-                sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
-                        selected_battery_profile->getBatteryName().c_str(),
-                        selected_battery_profile->getDisplayName().c_str(),
-                        selected_battery_profile->getCutoffVoltage(),
-                        selected_battery_profile->getConstCurrent());
+                if (TEST_SCREEN) {
+                    sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayNameForJapanese().c_str(),
+                            selected_battery_profile->getCutoffVoltage(),
+                            selected_battery_profile->getConstCurrent());
+                } else {
+                    sprintf(details_text, "選択電池: %s , %s",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayNameForJapanese().c_str());
+                }
                 lv_label_set_text(screen6_battery_details_label, details_text);
             } else {
                 lv_label_set_text(screen6_battery_details_label, "選択電池: なし");
@@ -394,11 +423,17 @@ void switch_to_screen(screen_id_t screen_id) {
         if (screen_id == SCREEN_EMERGENCY_STOP && screen7_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
                 char details_text[180];
-                sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
-                        selected_battery_profile->getBatteryName().c_str(),
-                        selected_battery_profile->getDisplayName().c_str(),
-                        selected_battery_profile->getCutoffVoltage(),
-                        selected_battery_profile->getConstCurrent());
+                if (TEST_SCREEN) {
+                    sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayNameForJapanese().c_str(),
+                            selected_battery_profile->getCutoffVoltage(),
+                            selected_battery_profile->getConstCurrent());
+                } else {
+                    sprintf(details_text, "選択電池: %s , %s",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayNameForJapanese().c_str());
+                }
                 lv_label_set_text(screen7_battery_details_label, details_text);
             } else {
                 lv_label_set_text(screen7_battery_details_label, "選択電池: なし");
@@ -1125,7 +1160,7 @@ void update_current_screen() {
             
             if (current_time - last_rtc_update_time >= RTC_UPDATE_INTERVAL) {
                 char rtc_text[50];
-                sprintf(rtc_text, "M2 時間: %04d-%02d-%02d %02d:%02d:%02d",
+                sprintf(rtc_text, "%04d-%02d-%02d %02d:%02d:%02d",
                         m2Time.year, m2Time.month, m2Time.date,
                         m2Time.hour, m2Time.minute, m2Time.second);
                 lv_label_set_text(screen1_rtc_time_label, rtc_text);
@@ -1143,7 +1178,7 @@ void update_current_screen() {
         const unsigned long RTC_UPDATE_INTERVAL = 500;  // 2Hz = 500ms
         if (current_time - last_rtc_update_time >= RTC_UPDATE_INTERVAL) {
             char rtc_text_18[50];
-            sprintf(rtc_text_18, "M2 時間: %04d-%02d-%02d %02d:%02d:%02d",
+            sprintf(rtc_text_18, "%04d-%02d-%02d %02d:%02d:%02d",
                     m2Time.year, m2Time.month, m2Time.date,
                     m2Time.hour, m2Time.minute, m2Time.second);
             lv_label_set_text(screen18_rtc_time_label, rtc_text_18);
@@ -1210,59 +1245,79 @@ void update_current_screen() {
         }
     }
     
-    // Update temperature label on screen 3
-    if (screen3_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
+    // Update temperature label on screen 3 (only when TEST_SCREEN; line hidden when 0)
+    if (TEST_SCREEN && screen3_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
         float temp1_celsius = sensorData.temp1 / 100.0f;
         float temp2_celsius = sensorData.temp2 / 100.0f;
         char temp_text[80];
-        sprintf(temp_text, "モーター温度: %.1f , GCU温度: %.1f", temp1_celsius, temp2_celsius);
+        sprintf(temp_text, "モーター温度: %.1f , GVOLTA温度: %.1f", temp1_celsius, temp2_celsius);
         lv_label_set_text(screen3_temp_label, temp_text);
     }
     if (screen4_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
         if (selected_battery_profile != nullptr) {
             char details_text[180];
-            sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
-                    selected_battery_profile->getBatteryName().c_str(),
-                    selected_battery_profile->getDisplayName().c_str(),
-                    selected_battery_profile->getCutoffVoltage(),
-                    selected_battery_profile->getConstCurrent());
+            if (TEST_SCREEN) {
+                sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayNameForJapanese().c_str(),
+                        selected_battery_profile->getCutoffVoltage(),
+                        selected_battery_profile->getConstCurrent());
+            } else {
+                sprintf(details_text, "選択電池: %s , %s",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayNameForJapanese().c_str());
+            }
             lv_label_set_text(screen4_battery_details_label, details_text);
         } else {
             lv_label_set_text(screen4_battery_details_label, "選択電池: なし");
         }
     }
-    // Update temperature label on screen 4
-    if (screen4_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
+    // Update temperature label on screen 4 (only when TEST_SCREEN)
+    if (TEST_SCREEN && screen4_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
         float temp1_celsius = sensorData.temp1 / 100.0f;
         float temp2_celsius = sensorData.temp2 / 100.0f;
         char temp_text[80];
-        sprintf(temp_text, "モーター温度: %.1f , GCU温度: %.1f", temp1_celsius, temp2_celsius);
+        sprintf(temp_text, "モーター温度: %.1f , GVOLTA温度: %.1f", temp1_celsius, temp2_celsius);
         lv_label_set_text(screen4_temp_label, temp_text);
     }
-    // Update temperature label on screen 5
-    if (screen5_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_CV) {
+    // Update temperature label on screen 5 (only when TEST_SCREEN)
+    if (TEST_SCREEN && screen5_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_CV) {
         float temp1_celsius = sensorData.temp1 / 100.0f;
         float temp2_celsius = sensorData.temp2 / 100.0f;
         char temp_text[80];
-        sprintf(temp_text, "モーター温度: %.1f , GCU温度: %.1f", temp1_celsius, temp2_celsius);
+        sprintf(temp_text, "モーター温度: %.1f , GVOLTA温度: %.1f", temp1_celsius, temp2_celsius);
         lv_label_set_text(screen5_temp_label, temp_text);
     }
-    // Update temperature label on screen 8 (temp + 飽和電圧 on one line)
+    // Update temperature label on screen 8: TEST_SCREEN = temp + saturation; !TEST_SCREEN = saturation voltage only
     if (screen8_temp_label != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
-        float temp1_celsius = sensorData.temp1 / 100.0f;
-        float temp2_celsius = sensorData.temp2 / 100.0f;
-        char temp_text[120];
-        sprintf(temp_text, "モーター温度: %.1f , GCU温度: %.1f , 飽和電圧: %.2f V", temp1_celsius, temp2_celsius, voltage_saturation_detected_voltage);
-        lv_label_set_text(screen8_temp_label, temp_text);
+        if (TEST_SCREEN) {
+            float temp1_celsius = sensorData.temp1 / 100.0f;
+            float temp2_celsius = sensorData.temp2 / 100.0f;
+            char temp_text[120];
+            sprintf(temp_text, "モーター温度: %.1f , GVOLTA温度: %.1f , 飽和電圧: %.2f V", temp1_celsius, temp2_celsius, voltage_saturation_detected_voltage);
+            lv_label_set_text(screen8_temp_label, temp_text);
+            lv_obj_clear_flag(screen8_temp_label, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            char sat_text[60];
+            sprintf(sat_text, "飽和電圧: %.2f V", voltage_saturation_detected_voltage);
+            lv_label_set_text(screen8_temp_label, sat_text);
+            lv_obj_clear_flag(screen8_temp_label, LV_OBJ_FLAG_HIDDEN);
+        }
     }
     if (screen8_battery_details_label != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
         if (selected_battery_profile != nullptr) {
             char details_text[220];
-            sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
-                    selected_battery_profile->getBatteryName().c_str(),
-                    selected_battery_profile->getDisplayName().c_str(),
-                    selected_battery_profile->getCutoffVoltage(),
-                    selected_battery_profile->getConstCurrent());
+            if (TEST_SCREEN) {
+                sprintf(details_text, "選択電池: %s , %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayNameForJapanese().c_str(),
+                        selected_battery_profile->getCutoffVoltage(),
+                        selected_battery_profile->getConstCurrent());
+            } else {
+                sprintf(details_text, "選択電池: %s , %s",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayNameForJapanese().c_str());
+            }
             lv_label_set_text(screen8_battery_details_label, details_text);
         } else {
             lv_label_set_text(screen8_battery_details_label, "選択電池: なし");
@@ -1492,10 +1547,10 @@ void update_screen_based_on_state() {
 }
 
 // M2 heartbeat: run every 1s from loop. 6s grace for first frame 101 to arrive.
-// After grace: if no frame ever (can101_rx_timestamp == 0) or last frame > 2100 ms ago -> M2 lost (screen 18).
+// After grace: if no frame ever (can101_rx_timestamp == 0) or last frame > 3100 ms ago -> M2 lost (screen 18).
 void check_m2_heartbeat(void) {
     const unsigned long GRACE_MS = 6000;
-    const unsigned long LOST_THRESHOLD_MS = 2100;
+    const unsigned long LOST_THRESHOLD_MS = 3100;
     unsigned long now = (unsigned long) millis();
     if (now < GRACE_MS) {
         return;
@@ -1568,9 +1623,9 @@ void displayMatchingBatteryProfiles(float detectedVoltage, lv_obj_t* container) 
         // Add event handler for profile selection
         lv_obj_add_event_cb(profile_btn, screen2_profile_selected_event_handler, LV_EVENT_CLICKED, (void*)profile);
 
-        // Create label with battery info: "batteryName , displayName"
+        // Create label with battery info: "batteryName , displayName" (JAP: 鉛 for Lead Acid)
         lv_obj_t* profile_label = lv_label_create(profile_btn);
-        String labelText = profile->getBatteryName() + " , " + profile->getDisplayName();
+        String labelText = profile->getBatteryName() + " , " + profile->getDisplayNameForJapanese();
         lv_label_set_text(profile_label, labelText.c_str());
         lv_obj_set_style_text_font(profile_label, &arjunsJapFont_24, LV_PART_MAIN);
         lv_obj_set_style_text_color(profile_label, lv_color_hex(0x000000), LV_PART_MAIN);
@@ -1633,8 +1688,10 @@ void update_table_values() {
             }
             lv_table_set_cell_value(data_table, 1, 3, (present_power >= 0.0f) ? String(present_power, 1).c_str() : "--");
         }
-        // Column 4: log number
-        lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
+        // Column 4: log number only when TEST_SCREEN; else Version (APP_VERSION_STR) is static
+        if (TEST_SCREEN) {
+            lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
+        }
     }
 
     // Unlock LVGL
@@ -1801,14 +1858,20 @@ void screen2_confirm_agree_event_handler(lv_event_t * e) {
         lv_obj_add_flag(screen2_confirm_popup, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(screen2_battery_container, LV_OBJ_FLAG_HIDDEN);
         
-        // Show confirmed battery info below the table
+        // Show confirmed battery info below the table (no TV/TC when TEST_SCREEN 0)
         if (screen2_confirmed_battery_label != nullptr && selected_battery_profile != nullptr) {
             char confirmed_str[200];
-            sprintf(confirmed_str, "確認: %s , %s (TV: %.1f V, TC: %.1f A)",
-                    selected_battery_profile->getBatteryName().c_str(),
-                    selected_battery_profile->getDisplayName().c_str(),
-                    selected_battery_profile->getCutoffVoltage(),
-                    selected_battery_profile->getConstCurrent());
+            if (TEST_SCREEN) {
+                sprintf(confirmed_str, "確認: %s , %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayNameForJapanese().c_str(),
+                        selected_battery_profile->getCutoffVoltage(),
+                        selected_battery_profile->getConstCurrent());
+            } else {
+                sprintf(confirmed_str, "確認: %s , %s",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayNameForJapanese().c_str());
+            }
             lv_label_set_text(screen2_confirmed_battery_label, confirmed_str);
             lv_obj_clear_flag(screen2_confirmed_battery_label, LV_OBJ_FLAG_HIDDEN);
         }
@@ -1841,15 +1904,24 @@ void screen2_profile_selected_event_handler(lv_event_t * e) {
             char tc_str[50];
             char battery_info_str[120];
             snprintf(battery_info_str, sizeof(battery_info_str), "%s\n%s",
-                    selected_profile->getDisplayName().c_str(),
+                    selected_profile->getDisplayNameForJapanese().c_str(),
                     selected_profile->getBatteryName().c_str());
 
-            sprintf(tv_str, "目標電圧: %.1f V", selected_profile->getCutoffVoltage());
-            sprintf(tc_str, "目標電流: %.1f A", selected_profile->getConstCurrent());
+            if (TEST_SCREEN) {
+                sprintf(tv_str, "目標電圧: %.1f V", selected_profile->getCutoffVoltage());
+                sprintf(tc_str, "目標電流: %.1f A", selected_profile->getConstCurrent());
+                lv_label_set_text(screen2_confirm_voltage_label, tv_str);
+                lv_label_set_text(screen2_confirm_capacity_label, tc_str);
+                lv_obj_clear_flag(screen2_confirm_voltage_label, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_clear_flag(screen2_confirm_capacity_label, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_label_set_text(screen2_confirm_voltage_label, "");
+                lv_label_set_text(screen2_confirm_capacity_label, "");
+                lv_obj_add_flag(screen2_confirm_voltage_label, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(screen2_confirm_capacity_label, LV_OBJ_FLAG_HIDDEN);
+            }
 
             lv_label_set_text(screen2_confirm_battery_info_label, battery_info_str);
-            lv_label_set_text(screen2_confirm_voltage_label, tv_str);
-            lv_label_set_text(screen2_confirm_capacity_label, tc_str);
             lv_label_set_text(screen2_confirm_current_label, "");  // Hide unused label
             lv_label_set_text(screen2_confirm_type_label, "");  // Hide unused label
 
@@ -1920,8 +1992,7 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         if (sd_logging_initialized && selected_battery_profile != nullptr) {
             if (logChargeStart(&current_charge_log)) {
                 log_num_sdhc = (int32_t)current_charge_log.serial;
-                // Update table display immediately
-                if (data_table != nullptr) {
+                if (TEST_SCREEN && data_table != nullptr) {
                     lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
                 }
             }
@@ -2095,7 +2166,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW 充電器 v4.6");
+    lv_label_set_text(title, "GVOLTA 3kW 充電器");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &arjunsJapFont_30, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
@@ -2123,19 +2194,19 @@ void create_screen_1()
         lv_table_set_col_width(data_table, 3, 198);  // RPM or Power
         lv_table_set_col_width(data_table, 4, 198);  // Log
 
-        // Headers (Row 0) — JAP: 電圧 電流 温度 (回転数|電力) ログ数
+        // Headers (Row 0) — JAP: 電圧 電流 温度 (回転数|電力) (ログ数|バーション)
         lv_table_set_cell_value(data_table, 0, 0, "電圧(V)");
         lv_table_set_cell_value(data_table, 0, 1, "電流(A)");
         lv_table_set_cell_value(data_table, 0, 2, "温度(C)");
         lv_table_set_cell_value(data_table, 0, 3, TEST_SCREEN ? "回転数" : "電力(W)");
-        lv_table_set_cell_value(data_table, 0, 4, "ログ数");
+        lv_table_set_cell_value(data_table, 0, 4, TEST_SCREEN ? "ログ数" : "バーション");
 
         // Values (Row 1)
         lv_table_set_cell_value(data_table, 1, 0, "--");
         lv_table_set_cell_value(data_table, 1, 1, "--");
         lv_table_set_cell_value(data_table, 1, 2, "--");
         lv_table_set_cell_value(data_table, 1, 3, "--");
-        lv_table_set_cell_value(data_table, 1, 4, "-1");
+        lv_table_set_cell_value(data_table, 1, 4, TEST_SCREEN ? "-1" : APP_VERSION_STR);
 
         // Style table - Blue headers, white text
         lv_obj_set_style_bg_color(data_table, lv_color_hex(0x1E88E5), LV_PART_ITEMS);
@@ -2152,15 +2223,14 @@ void create_screen_1()
         lv_obj_set_width(data_table, LV_SIZE_CONTENT);
         lv_obj_set_height(data_table, LV_SIZE_CONTENT);
 
-        // Initialize log_num_sdhc from SD card (latest complete log number)
-        if (sd_logging_initialized) {
+        // Initialize log_num_sdhc from SD card; update col 5 only when TEST_SCREEN (Log number)
+        if (sd_logging_initialized && TEST_SCREEN) {
             uint32_t nextSerial = getNextSerialNumber();
             if (nextSerial > 1) {
                 log_num_sdhc = (int32_t)(nextSerial - 1);  // Latest complete log = next - 1
             } else {
                 log_num_sdhc = -1;  // No logs yet
             }
-            // Update table display with initial value
             lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
         }
     }
@@ -2169,9 +2239,9 @@ void create_screen_1()
     lv_obj_set_parent(data_table, screen_1);
     lv_obj_set_pos(data_table, 12, 110);
 
-    // M2 RTC Time label (20px below table)
+    // M2 RTC Time label (20px below table) — date/time only, no prefix
     screen1_rtc_time_label = lv_label_create(screen_1);
-    lv_label_set_text(screen1_rtc_time_label, "M2 時間: -- --");
+    lv_label_set_text(screen1_rtc_time_label, "-- --");
     lv_obj_set_style_text_font(screen1_rtc_time_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen1_rtc_time_label, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     //lv_obj_align(screen1_rtc_time_label, LV_ALIGN_TOP_LEFT, 12, 230);  // 20px below table (110 + ~100 table height + 20)
@@ -2236,7 +2306,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW 充電器 v4.6");
+    lv_label_set_text(title, "GVOLTA 3kW 充電器");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &arjunsJapFont_28, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -2332,19 +2402,21 @@ void create_screen_2(void) {
     lv_obj_set_style_text_color(screen2_confirm_battery_info_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen2_confirm_battery_info_label, LV_ALIGN_TOP_MID, 0, 55);
 
-    // Target Voltage label - below battery name block
+    // Target Voltage label - below battery name block (blank/hidden when TEST_SCREEN 0)
     screen2_confirm_voltage_label = lv_label_create(screen2_confirm_popup);
-    lv_label_set_text(screen2_confirm_voltage_label, "目標電圧: -- V");
+    lv_label_set_text(screen2_confirm_voltage_label, TEST_SCREEN ? "目標電圧: -- V" : "");
     lv_obj_set_style_text_font(screen2_confirm_voltage_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_voltage_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen2_confirm_voltage_label, LV_ALIGN_TOP_MID, 0, 150);
+    if (!TEST_SCREEN) { lv_obj_add_flag(screen2_confirm_voltage_label, LV_OBJ_FLAG_HIDDEN); }
 
-    // Target Current label
+    // Target Current label (blank/hidden when TEST_SCREEN 0)
     screen2_confirm_capacity_label = lv_label_create(screen2_confirm_popup);
-    lv_label_set_text(screen2_confirm_capacity_label, "目標電流: -- A");
+    lv_label_set_text(screen2_confirm_capacity_label, TEST_SCREEN ? "目標電流: -- A" : "");
     lv_obj_set_style_text_font(screen2_confirm_capacity_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_capacity_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen2_confirm_capacity_label, LV_ALIGN_TOP_MID, 0, 200);
+    if (!TEST_SCREEN) { lv_obj_add_flag(screen2_confirm_capacity_label, LV_OBJ_FLAG_HIDDEN); }
 
     // Current label (unused, hidden)
     screen2_confirm_current_label = lv_label_create(screen2_confirm_popup);
@@ -2427,12 +2499,13 @@ void create_screen_3(void) {
     lv_obj_set_style_text_font(screen3_battery_details_label, &arjunsJapFont_26, LV_PART_MAIN);
     lv_obj_align(screen3_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
     
-    // Temperature label (below battery details label)
+    // Temperature label (below battery details label). Hidden when TEST_SCREEN 0.
     screen3_temp_label = lv_label_create(screen_3);
-    lv_label_set_text(screen3_temp_label, "モーター温度: -- , GCU温度: --");
+    lv_label_set_text(screen3_temp_label, TEST_SCREEN ? "モーター温度: -- , GVOLTA温度: --" : "");
     lv_obj_set_style_text_color(screen3_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen3_temp_label, &arjunsJapFont_26, LV_PART_MAIN);
     lv_obj_align(screen3_temp_label, LV_ALIGN_TOP_LEFT, 12, 310);  // Below battery details label
+    if (!TEST_SCREEN) { lv_obj_add_flag(screen3_temp_label, LV_OBJ_FLAG_HIDDEN); }
     
     // Timer table (3x2) for screen 3 - below battery label, left aligned
     screen3_timer_table = lv_table_create(screen_3);
@@ -2441,13 +2514,13 @@ void create_screen_3(void) {
     lv_table_set_col_width(screen3_timer_table, 0, 200);
     lv_table_set_col_width(screen3_timer_table, 1, 200);
     lv_table_set_col_width(screen3_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
-    lv_table_set_cell_value(screen3_timer_table, 0, 0, "総時間");
+    lv_table_set_cell_value(screen3_timer_table, 0, 0, "充電時間");
     lv_table_set_cell_value(screen3_timer_table, 0, 1, "");
     lv_table_set_cell_value(screen3_timer_table, 0, 2, "充電量 (Ah)");
     lv_table_set_cell_value(screen3_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen3_timer_table, 1, 1, "");
     lv_table_set_cell_value(screen3_timer_table, 1, 2, "0.0");
-    lv_obj_set_style_bg_color(screen3_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
+    lv_obj_set_style_bg_color(screen3_timer_table, lv_color_hex(0xFFFFFF), LV_PART_ITEMS);  // White
     lv_obj_set_style_border_color(screen3_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen3_timer_table, 3, LV_PART_ITEMS);  // Thick black border
     lv_obj_set_style_text_font(screen3_timer_table, &arjunsJapFont_28, LV_PART_ITEMS);
@@ -2511,12 +2584,13 @@ void create_screen_4(void) {
     lv_obj_set_style_text_font(screen4_battery_details_label, &arjunsJapFont_26, LV_PART_MAIN);
     lv_obj_align(screen4_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Moved up 30px (300 -> 270)
     
-    // Temperature label (below battery details label)
+    // Temperature label (below battery details label). Hidden when TEST_SCREEN 0.
     screen4_temp_label = lv_label_create(screen_4);
-    lv_label_set_text(screen4_temp_label, "モーター温度: -- , GCU温度: --");
+    lv_label_set_text(screen4_temp_label, TEST_SCREEN ? "モーター温度: -- , GVOLTA温度: --" : "");
     lv_obj_set_style_text_color(screen4_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen4_temp_label, &arjunsJapFont_26, LV_PART_MAIN);
     lv_obj_align(screen4_temp_label, LV_ALIGN_TOP_LEFT, 12, 310);  // Below battery details label
+    if (!TEST_SCREEN) { lv_obj_add_flag(screen4_temp_label, LV_OBJ_FLAG_HIDDEN); }
     
     // Timer table (3x2) for screen 4 - below battery label, left aligned
     screen4_timer_table = lv_table_create(screen_4);
@@ -2525,13 +2599,13 @@ void create_screen_4(void) {
     lv_table_set_col_width(screen4_timer_table, 0, 200);
     lv_table_set_col_width(screen4_timer_table, 1, 200);
     lv_table_set_col_width(screen4_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
-    lv_table_set_cell_value(screen4_timer_table, 0, 0, "総時間");
+    lv_table_set_cell_value(screen4_timer_table, 0, 0, "充電時間");
     lv_table_set_cell_value(screen4_timer_table, 0, 1, "");
     lv_table_set_cell_value(screen4_timer_table, 0, 2, "充電量 (Ah)");
     lv_table_set_cell_value(screen4_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen4_timer_table, 1, 1, "");
     lv_table_set_cell_value(screen4_timer_table, 1, 2, "0.0");
-    lv_obj_set_style_bg_color(screen4_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
+    lv_obj_set_style_bg_color(screen4_timer_table, lv_color_hex(0xFFFFFF), LV_PART_ITEMS);  // White
     lv_obj_set_style_border_color(screen4_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen4_timer_table, 3, LV_PART_ITEMS);  // Thick black border
     lv_obj_set_style_text_font(screen4_timer_table, &arjunsJapFont_28, LV_PART_ITEMS);
@@ -2596,11 +2670,12 @@ void create_screen_5(void) {
     
     // Temperature label (below battery details label)
     screen5_temp_label = lv_label_create(screen_5);
-    lv_label_set_text(screen5_temp_label, "モーター温度: -- , GCU温度: --");
+    lv_label_set_text(screen5_temp_label, TEST_SCREEN ? "モーター温度: -- , GVOLTA温度: --" : "");
     lv_obj_set_style_text_color(screen5_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen5_temp_label, &arjunsJapFont_26, LV_PART_MAIN);
     lv_obj_align(screen5_temp_label, LV_ALIGN_TOP_LEFT, 12, 310);  // Below battery details label
-    
+    if (!TEST_SCREEN) { lv_obj_add_flag(screen5_temp_label, LV_OBJ_FLAG_HIDDEN); }
+
     // Timer table (3x2) for screen 5 - shows total time, remaining time, and Ah, below battery label, left aligned
     screen5_timer_table = lv_table_create(screen_5);
     lv_table_set_col_cnt(screen5_timer_table, 3);
@@ -2608,13 +2683,13 @@ void create_screen_5(void) {
     lv_table_set_col_width(screen5_timer_table, 0, 200);
     lv_table_set_col_width(screen5_timer_table, 1, 200);
     lv_table_set_col_width(screen5_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
-    lv_table_set_cell_value(screen5_timer_table, 0, 0, "総時間");
+    lv_table_set_cell_value(screen5_timer_table, 0, 0, "充電時間");
     lv_table_set_cell_value(screen5_timer_table, 0, 1, "残り時間");
     lv_table_set_cell_value(screen5_timer_table, 0, 2, "充電量 (Ah)");
     lv_table_set_cell_value(screen5_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen5_timer_table, 1, 1, "00:00");
     lv_table_set_cell_value(screen5_timer_table, 1, 2, "0.0");
-    lv_obj_set_style_bg_color(screen5_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
+    lv_obj_set_style_bg_color(screen5_timer_table, lv_color_hex(0xFFFFFF), LV_PART_ITEMS);  // White
     lv_obj_set_style_border_color(screen5_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen5_timer_table, 3, LV_PART_ITEMS);  // Thick black border
     lv_obj_set_style_text_font(screen5_timer_table, &arjunsJapFont_28, LV_PART_ITEMS);
@@ -2684,7 +2759,7 @@ void create_screen_6(void) {
     lv_table_set_col_width(screen6_timer_table, 0, 200);
     lv_table_set_col_width(screen6_timer_table, 1, 200);
     lv_table_set_col_width(screen6_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
-    lv_table_set_cell_value(screen6_timer_table, 0, 0, "総時間");
+    lv_table_set_cell_value(screen6_timer_table, 0, 0, "充電時間");
     lv_table_set_cell_value(screen6_timer_table, 0, 1, "残り時間");
     lv_table_set_cell_value(screen6_timer_table, 0, 2, "充電量 (Ah)");
     lv_table_set_cell_value(screen6_timer_table, 1, 0, "00:00:00");
@@ -2714,16 +2789,16 @@ void create_screen_6(void) {
 
     // Create remove battery popup for screen 6
     screen6_remove_battery_popup = lv_obj_create(screen_6);
-    lv_obj_set_size(screen6_remove_battery_popup, 700, 350);
+    lv_obj_set_size(screen6_remove_battery_popup, 800, 350);
     lv_obj_center(screen6_remove_battery_popup);
     lv_obj_set_style_bg_color(screen6_remove_battery_popup, lv_color_hex(0xFFE4B5), LV_PART_MAIN);  // Moccasin background
     lv_obj_set_style_border_width(screen6_remove_battery_popup, 4, LV_PART_MAIN);
     lv_obj_set_style_border_color(screen6_remove_battery_popup, lv_color_hex(0xFF6600), LV_PART_MAIN);  // Orange border
     lv_obj_set_style_radius(screen6_remove_battery_popup, 15, LV_PART_MAIN);
     lv_obj_add_flag(screen6_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
-    
+
     screen6_remove_battery_label = lv_label_create(screen6_remove_battery_popup);
-    lv_label_set_text(screen6_remove_battery_label, "電池を切断してから\n戻ってください");
+    lv_label_set_text(screen6_remove_battery_label, "電池をコネクターから外すとホーム画面に戻ります");
     lv_obj_set_style_text_font(screen6_remove_battery_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen6_remove_battery_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red text
     lv_obj_set_style_text_align(screen6_remove_battery_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
@@ -2777,7 +2852,7 @@ void create_screen_7(void) {
     lv_table_set_col_width(screen7_timer_table, 0, 200);
     lv_table_set_col_width(screen7_timer_table, 1, 200);
     lv_table_set_col_width(screen7_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
-    lv_table_set_cell_value(screen7_timer_table, 0, 0, "総時間");
+    lv_table_set_cell_value(screen7_timer_table, 0, 0, "充電時間");
     lv_table_set_cell_value(screen7_timer_table, 0, 1, "");
     lv_table_set_cell_value(screen7_timer_table, 0, 2, "充電量 (Ah)");
     lv_table_set_cell_value(screen7_timer_table, 1, 0, "00:00:00");
@@ -2807,16 +2882,16 @@ void create_screen_7(void) {
 
     // Create remove battery popup for screen 7
     screen7_remove_battery_popup = lv_obj_create(screen_7);
-    lv_obj_set_size(screen7_remove_battery_popup, 700, 350);
+    lv_obj_set_size(screen7_remove_battery_popup, 800, 350);
     lv_obj_center(screen7_remove_battery_popup);
     lv_obj_set_style_bg_color(screen7_remove_battery_popup, lv_color_hex(0xFFE4B5), LV_PART_MAIN);  // Moccasin background
     lv_obj_set_style_border_width(screen7_remove_battery_popup, 4, LV_PART_MAIN);
     lv_obj_set_style_border_color(screen7_remove_battery_popup, lv_color_hex(0xFF6600), LV_PART_MAIN);  // Orange border
     lv_obj_set_style_radius(screen7_remove_battery_popup, 15, LV_PART_MAIN);
     lv_obj_add_flag(screen7_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
-    
+
     screen7_remove_battery_label = lv_label_create(screen7_remove_battery_popup);
-    lv_label_set_text(screen7_remove_battery_label, "電池を切断してから\n戻ってください");
+    lv_label_set_text(screen7_remove_battery_label, "電池をコネクターから外すとホーム画面に戻ります");
     lv_obj_set_style_text_font(screen7_remove_battery_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen7_remove_battery_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red text
     lv_obj_set_style_text_align(screen7_remove_battery_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
@@ -2827,7 +2902,7 @@ void create_screen_7(void) {
 }
 
 //screen 8 - Voltage saturation detected (Jap)
-// Screen 8 labels (Jap): title; status_label_8 "飽和電圧でCV充電中"; data_table; screen8_battery_details_label (選択電池 + 飽和電圧 → update_current_screen()); screen8_temp_label (モーター温度/GCU温度 → update_current_screen()); screen8_timer_table; screen8_emergency_stop_btn/label "緊急停止".
+// Screen 8 labels (Jap): title; status_label_8 "飽和電圧でCV充電中"; data_table; screen8_battery_details_label (選択電池 + 飽和電圧 → update_current_screen()); screen8_temp_label (モーター温度/GVOLTA温度 → update_current_screen()); screen8_timer_table; screen8_emergency_stop_btn/label "緊急停止".
 void create_screen_8(void) {
     screen_8 = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(screen_8, lv_color_hex(0xD3D3D3), LV_PART_MAIN);  // Light gray background
@@ -2864,12 +2939,13 @@ void create_screen_8(void) {
     lv_obj_set_style_text_font(screen8_battery_details_label, &arjunsJapFont_24, LV_PART_MAIN);
     lv_obj_align(screen8_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 270);
     
-    // Temperature label (below battery details, same position and size as screens 3,4,5)
+    // Temperature label (below battery details, same position and size as screens 3,4,5). Hidden when TEST_SCREEN 0.
     screen8_temp_label = lv_label_create(screen_8);
-    lv_label_set_text(screen8_temp_label, "モーター温度: -- , GCU温度: --");
+    lv_label_set_text(screen8_temp_label, TEST_SCREEN ? "モーター温度: -- , GVOLTA温度: --" : "");
     lv_obj_set_style_text_color(screen8_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen8_temp_label, &arjunsJapFont_26, LV_PART_MAIN);
     lv_obj_align(screen8_temp_label, LV_ALIGN_TOP_LEFT, 12, 310);
+    if (!TEST_SCREEN) { lv_obj_add_flag(screen8_temp_label, LV_OBJ_FLAG_HIDDEN); }
     
     // Timer table (3x2) for screen 8 - below temp label, same position as screens 3,4,5
     screen8_timer_table = lv_table_create(screen_8);
@@ -2878,7 +2954,7 @@ void create_screen_8(void) {
     lv_table_set_col_width(screen8_timer_table, 0, 200);
     lv_table_set_col_width(screen8_timer_table, 1, 200);
     lv_table_set_col_width(screen8_timer_table, 2, 240);  // Wider so "Charged(Ah)" doesn't wrap
-    lv_table_set_cell_value(screen8_timer_table, 0, 0, "総時間");
+    lv_table_set_cell_value(screen8_timer_table, 0, 0, "充電時間");
     lv_table_set_cell_value(screen8_timer_table, 0, 1, "残り時間");
     lv_table_set_cell_value(screen8_timer_table, 0, 2, "充電量 (Ah)");
     lv_table_set_cell_value(screen8_timer_table, 1, 0, "00:00:00");
@@ -3032,19 +3108,19 @@ void create_screen_18(void) {
 
     // Labels above table (table at y=110, ~100px tall)
     lv_obj_t* title = lv_label_create(screen_18);
-    lv_label_set_text(title, "Connection failed or lost with M2 V4.6"); //update ver number here too
+    lv_label_set_text(title, "Connection failed or lost with M2");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
 
     lv_obj_t* msg = lv_label_create(screen_18);
-    lv_label_set_text(msg, "Error 18、モーター停止");
+    lv_label_set_text(msg, "再起動してください");
     lv_obj_set_style_text_color(msg, lv_color_hex(0x8B0000), LV_PART_MAIN);
     lv_obj_set_style_text_font(msg, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 285);
 
     lv_obj_t* msg2 = lv_label_create(screen_18);
-    lv_label_set_text(msg2, "M2確認して再起動");
+    lv_label_set_text(msg2, "問題が解決しない場合 GCユニバーサル に連絡ください。");
     lv_obj_set_style_text_color(msg2, lv_color_hex(0x8B0000), LV_PART_MAIN);
     lv_obj_set_style_text_font(msg2, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_align(msg2, LV_ALIGN_TOP_MID, 0, 330);
@@ -3055,9 +3131,9 @@ void create_screen_18(void) {
         lv_obj_set_pos(data_table, 12, 110);
     }
 
-    // M2 RTC time label 20px below table (same position and style as screen 1)
+    // M2 RTC time label 20px below table (date/time only, no prefix)
     screen18_rtc_time_label = lv_label_create(screen_18);
-    lv_label_set_text(screen18_rtc_time_label, "M2 時間: -- --");
+    lv_label_set_text(screen18_rtc_time_label, "-- --");
     lv_obj_set_style_text_font(screen18_rtc_time_label, &arjunsJapFont_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen18_rtc_time_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen18_rtc_time_label, LV_ALIGN_TOP_MID, 0, 390);  // screen center below table
@@ -3338,6 +3414,11 @@ void switch_to_screen(screen_id_t screen_id) {
             Serial.println("[M2] Stop motor sent");
             send_contactor_control(CONTACTOR_OPEN);
             Serial.println("[M2] Contactor open sent");
+            // Stop charging FSM and clear flags so motor never restarts while on screen 18
+            current_app_state = STATE_EMERGENCY_STOP;
+            charging_complete = true;
+            current_flow_start = false;
+            pending_stop_command = false;
         }
 
         // Lock LVGL for entire switch (move table + load screen). Prevents first-boot overlay
@@ -3398,15 +3479,21 @@ void switch_to_screen(screen_id_t screen_id) {
             }
         }
 
-        // Set battery details label once on entry to screens 3, 4, 5 (won't change during charge)
+        // Set battery details label once on entry to screens 3, 4, 5 (won't change during charge). TEST_SCREEN 0 = no TV/TC
         if (screen_id == SCREEN_CHARGING_STARTED && screen3_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
                 char details_text[180];
-                sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
-                        selected_battery_profile->getBatteryName().c_str(),
-                        selected_battery_profile->getDisplayName().c_str(),
-                        selected_battery_profile->getCutoffVoltage(),
-                        selected_battery_profile->getConstCurrent());
+                if (TEST_SCREEN) {
+                    sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayName().c_str(),
+                            selected_battery_profile->getCutoffVoltage(),
+                            selected_battery_profile->getConstCurrent());
+                } else {
+                    sprintf(details_text, "Selected Battery: %s , %s",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayName().c_str());
+                }
                 lv_label_set_text(screen3_battery_details_label, details_text);
             } else {
                 lv_label_set_text(screen3_battery_details_label, "Selected Battery: None");
@@ -3415,11 +3502,17 @@ void switch_to_screen(screen_id_t screen_id) {
         if (screen_id == SCREEN_CHARGING_CC && screen4_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
                 char details_text[180];
-                sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
-                        selected_battery_profile->getBatteryName().c_str(),
-                        selected_battery_profile->getDisplayName().c_str(),
-                        selected_battery_profile->getCutoffVoltage(),
-                        selected_battery_profile->getConstCurrent());
+                if (TEST_SCREEN) {
+                    sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayName().c_str(),
+                            selected_battery_profile->getCutoffVoltage(),
+                            selected_battery_profile->getConstCurrent());
+                } else {
+                    sprintf(details_text, "Selected Battery: %s , %s",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayName().c_str());
+                }
                 lv_label_set_text(screen4_battery_details_label, details_text);
             } else {
                 lv_label_set_text(screen4_battery_details_label, "Selected Battery: None");
@@ -3428,11 +3521,17 @@ void switch_to_screen(screen_id_t screen_id) {
         if (screen_id == SCREEN_CHARGING_CV && screen5_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
                 char details_text[180];
-                sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
-                        selected_battery_profile->getBatteryName().c_str(),
-                        selected_battery_profile->getDisplayName().c_str(),
-                        selected_battery_profile->getCutoffVoltage(),
-                        selected_battery_profile->getConstCurrent());
+                if (TEST_SCREEN) {
+                    sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayName().c_str(),
+                            selected_battery_profile->getCutoffVoltage(),
+                            selected_battery_profile->getConstCurrent());
+                } else {
+                    sprintf(details_text, "Selected Battery: %s , %s",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayName().c_str());
+                }
                 lv_label_set_text(screen5_battery_details_label, details_text);
             } else {
                 lv_label_set_text(screen5_battery_details_label, "Selected Battery: None");
@@ -3442,11 +3541,17 @@ void switch_to_screen(screen_id_t screen_id) {
         if (screen_id == SCREEN_CHARGING_COMPLETE && screen6_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
                 char details_text[180];
-                sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
-                        selected_battery_profile->getBatteryName().c_str(),
-                        selected_battery_profile->getDisplayName().c_str(),
-                        selected_battery_profile->getCutoffVoltage(),
-                        selected_battery_profile->getConstCurrent());
+                if (TEST_SCREEN) {
+                    sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayName().c_str(),
+                            selected_battery_profile->getCutoffVoltage(),
+                            selected_battery_profile->getConstCurrent());
+                } else {
+                    sprintf(details_text, "Selected Battery: %s , %s",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayName().c_str());
+                }
                 lv_label_set_text(screen6_battery_details_label, details_text);
             } else {
                 lv_label_set_text(screen6_battery_details_label, "Selected Battery: None");
@@ -3455,11 +3560,17 @@ void switch_to_screen(screen_id_t screen_id) {
         if (screen_id == SCREEN_EMERGENCY_STOP && screen7_battery_details_label != nullptr) {
             if (selected_battery_profile != nullptr) {
                 char details_text[180];
-                sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
-                        selected_battery_profile->getBatteryName().c_str(),
-                        selected_battery_profile->getDisplayName().c_str(),
-                        selected_battery_profile->getCutoffVoltage(),
-                        selected_battery_profile->getConstCurrent());
+                if (TEST_SCREEN) {
+                    sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayName().c_str(),
+                            selected_battery_profile->getCutoffVoltage(),
+                            selected_battery_profile->getConstCurrent());
+                } else {
+                    sprintf(details_text, "Selected Battery: %s , %s",
+                            selected_battery_profile->getBatteryName().c_str(),
+                            selected_battery_profile->getDisplayName().c_str());
+                }
                 lv_label_set_text(screen7_battery_details_label, details_text);
             } else {
                 lv_label_set_text(screen7_battery_details_label, "Selected Battery: None");
@@ -4186,7 +4297,7 @@ void update_current_screen() {
             
             if (current_time - last_rtc_update_time >= RTC_UPDATE_INTERVAL) {
                 char rtc_text[50];
-                sprintf(rtc_text, "M2 rtc time: %04d-%02d-%02d %02d:%02d:%02d",
+                sprintf(rtc_text, "%04d-%02d-%02d %02d:%02d:%02d",
                         m2Time.year, m2Time.month, m2Time.date,
                         m2Time.hour, m2Time.minute, m2Time.second);
                 lv_label_set_text(screen1_rtc_time_label, rtc_text);
@@ -4204,7 +4315,7 @@ void update_current_screen() {
         const unsigned long RTC_UPDATE_INTERVAL = 500;  // 2Hz = 500ms
         if (current_time - last_rtc_update_time >= RTC_UPDATE_INTERVAL) {
             char rtc_text_18[50];
-            sprintf(rtc_text_18, "M2 rtc time: %04d-%02d-%02d %02d:%02d:%02d",
+            sprintf(rtc_text_18, "%04d-%02d-%02d %02d:%02d:%02d",
                     m2Time.year, m2Time.month, m2Time.date,
                     m2Time.hour, m2Time.minute, m2Time.second);
             lv_label_set_text(screen18_rtc_time_label, rtc_text_18);
@@ -4271,60 +4382,81 @@ void update_current_screen() {
         }
     }
     
-    // Update temperature label on screen 3
-    if (screen3_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
+    // Update temperature label on screen 3 (only when TEST_SCREEN; line hidden when 0)
+    if (TEST_SCREEN && screen3_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_STARTED) {
         float temp1_celsius = sensorData.temp1 / 100.0f;
         float temp2_celsius = sensorData.temp2 / 100.0f;
         char temp_text[80];
-        sprintf(temp_text, "Motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
+        sprintf(temp_text, "Motor temp : %.1f , Gvolta temp : %.1f", temp1_celsius, temp2_celsius);
         lv_label_set_text(screen3_temp_label, temp_text);
     }
     if (screen4_battery_details_label != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
         if (selected_battery_profile != nullptr) {
             char details_text[180];
-            sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
-                    selected_battery_profile->getBatteryName().c_str(),
-                    selected_battery_profile->getDisplayName().c_str(),
-                    selected_battery_profile->getCutoffVoltage(),
-                    selected_battery_profile->getConstCurrent());
+            if (TEST_SCREEN) {
+                sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayName().c_str(),
+                        selected_battery_profile->getCutoffVoltage(),
+                        selected_battery_profile->getConstCurrent());
+            } else {
+                sprintf(details_text, "Selected Battery: %s , %s",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayName().c_str());
+            }
             lv_label_set_text(screen4_battery_details_label, details_text);
         } else {
             lv_label_set_text(screen4_battery_details_label, "Selected Battery: None");
         }
     }
-    // Update temperature label on screen 4
-    if (screen4_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
+    // Update temperature label on screen 4 (only when TEST_SCREEN)
+    if (TEST_SCREEN && screen4_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_CC) {
         float temp1_celsius = sensorData.temp1 / 100.0f;
         float temp2_celsius = sensorData.temp2 / 100.0f;
         char temp_text[80];
-        sprintf(temp_text, "Motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
+        sprintf(temp_text, "Motor temp : %.1f , Gvolta temp : %.1f", temp1_celsius, temp2_celsius);
         lv_label_set_text(screen4_temp_label, temp_text);
     }
-    // Update temperature label on screen 5
-    if (screen5_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_CV) {
+    // Update temperature label on screen 5 (only when TEST_SCREEN)
+    if (TEST_SCREEN && screen5_temp_label != nullptr && current_screen_id == SCREEN_CHARGING_CV) {
         float temp1_celsius = sensorData.temp1 / 100.0f;
         float temp2_celsius = sensorData.temp2 / 100.0f;
         char temp_text[80];
-        sprintf(temp_text, "Motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
+        sprintf(temp_text, "Motor temp : %.1f , Gvolta temp : %.1f", temp1_celsius, temp2_celsius);
         lv_label_set_text(screen5_temp_label, temp_text);
     }
-    // Update temperature label on screen 8 (same format as screens 3,4,5)
+    // Update temperature label on screen 8: TEST_SCREEN = temp; !TEST_SCREEN = saturation voltage only
     if (screen8_temp_label != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
-        float temp1_celsius = sensorData.temp1 / 100.0f;
-        float temp2_celsius = sensorData.temp2 / 100.0f;
-        char temp_text[80];
-        sprintf(temp_text, "Motor temp : %.1f , Gcu temp : %.1f", temp1_celsius, temp2_celsius);
-        lv_label_set_text(screen8_temp_label, temp_text);
+        if (TEST_SCREEN) {
+            float temp1_celsius = sensorData.temp1 / 100.0f;
+            float temp2_celsius = sensorData.temp2 / 100.0f;
+            char temp_text[80];
+            sprintf(temp_text, "Motor temp : %.1f , Gvolta temp : %.1f", temp1_celsius, temp2_celsius);
+            lv_label_set_text(screen8_temp_label, temp_text);
+            lv_obj_clear_flag(screen8_temp_label, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            char sat_text[60];
+            sprintf(sat_text, "Saturation Voltage: %.2f V", voltage_saturation_detected_voltage);
+            lv_label_set_text(screen8_temp_label, sat_text);
+            lv_obj_clear_flag(screen8_temp_label, LV_OBJ_FLAG_HIDDEN);
+        }
     }
     if (screen8_battery_details_label != nullptr && current_screen_id == SCREEN_VOLTAGE_SATURATION) {
         if (selected_battery_profile != nullptr) {
             char details_text[220];
-            sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)\nSaturation Voltage: %.2f V",
-                    selected_battery_profile->getBatteryName().c_str(),
-                    selected_battery_profile->getDisplayName().c_str(),
-                    selected_battery_profile->getCutoffVoltage(),
-                    selected_battery_profile->getConstCurrent(),
-                    voltage_saturation_detected_voltage);
+            if (TEST_SCREEN) {
+                sprintf(details_text, "Selected Battery: %s , %s (TV: %.1f V, TC: %.1f A)\nSaturation Voltage: %.2f V",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayName().c_str(),
+                        selected_battery_profile->getCutoffVoltage(),
+                        selected_battery_profile->getConstCurrent(),
+                        voltage_saturation_detected_voltage);
+            } else {
+                sprintf(details_text, "Selected Battery: %s , %s\nSaturation Voltage: %.2f V",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayName().c_str(),
+                        voltage_saturation_detected_voltage);
+            }
             lv_label_set_text(screen8_battery_details_label, details_text);
         } else {
             lv_label_set_text(screen8_battery_details_label, "Selected Battery: None");
@@ -4695,8 +4827,10 @@ void update_table_values() {
             }
             lv_table_set_cell_value(data_table, 1, 3, (present_power >= 0.0f) ? String(present_power, 1).c_str() : "--");
         }
-        // Column 4: log number
-        lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
+        // Column 4: log number only when TEST_SCREEN; else Version (APP_VERSION_STR) is static
+        if (TEST_SCREEN) {
+            lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
+        }
     }
 
     // Unlock LVGL
@@ -4863,14 +4997,20 @@ void screen2_confirm_agree_event_handler(lv_event_t * e) {
         lv_obj_add_flag(screen2_confirm_popup, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(screen2_battery_container, LV_OBJ_FLAG_HIDDEN);
         
-        // Show confirmed battery info below the table
+        // Show confirmed battery info below the table (no TV/TC when TEST_SCREEN 0)
         if (screen2_confirmed_battery_label != nullptr && selected_battery_profile != nullptr) {
             char confirmed_str[200];
-            sprintf(confirmed_str, "Confirmed: %s , %s (TV: %.1f V, TC: %.1f A)",
-                    selected_battery_profile->getBatteryName().c_str(),
-                    selected_battery_profile->getDisplayName().c_str(),
-                    selected_battery_profile->getCutoffVoltage(),
-                    selected_battery_profile->getConstCurrent());
+            if (TEST_SCREEN) {
+                sprintf(confirmed_str, "Confirmed: %s , %s (TV: %.1f V, TC: %.1f A)",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayName().c_str(),
+                        selected_battery_profile->getCutoffVoltage(),
+                        selected_battery_profile->getConstCurrent());
+            } else {
+                sprintf(confirmed_str, "Confirmed: %s , %s",
+                        selected_battery_profile->getBatteryName().c_str(),
+                        selected_battery_profile->getDisplayName().c_str());
+            }
             lv_label_set_text(screen2_confirmed_battery_label, confirmed_str);
             lv_obj_clear_flag(screen2_confirmed_battery_label, LV_OBJ_FLAG_HIDDEN);
         }
@@ -4906,12 +5046,21 @@ void screen2_profile_selected_event_handler(lv_event_t * e) {
                     selected_profile->getDisplayName().c_str(),
                     selected_profile->getBatteryName().c_str());
 
-            sprintf(tv_str, "Target Voltage: %.1f V", selected_profile->getCutoffVoltage());
-            sprintf(tc_str, "Target Current: %.1f A", selected_profile->getConstCurrent());
+            if (TEST_SCREEN) {
+                sprintf(tv_str, "Target Voltage: %.1f V", selected_profile->getCutoffVoltage());
+                sprintf(tc_str, "Target Current: %.1f A", selected_profile->getConstCurrent());
+                lv_label_set_text(screen2_confirm_voltage_label, tv_str);
+                lv_label_set_text(screen2_confirm_capacity_label, tc_str);
+                lv_obj_clear_flag(screen2_confirm_voltage_label, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_clear_flag(screen2_confirm_capacity_label, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_label_set_text(screen2_confirm_voltage_label, "");
+                lv_label_set_text(screen2_confirm_capacity_label, "");
+                lv_obj_add_flag(screen2_confirm_voltage_label, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(screen2_confirm_capacity_label, LV_OBJ_FLAG_HIDDEN);
+            }
 
             lv_label_set_text(screen2_confirm_battery_info_label, battery_info_str);
-            lv_label_set_text(screen2_confirm_voltage_label, tv_str);
-            lv_label_set_text(screen2_confirm_capacity_label, tc_str);
             lv_label_set_text(screen2_confirm_current_label, "");  // Hide unused label
             lv_label_set_text(screen2_confirm_type_label, "");  // Hide unused label
 
@@ -4982,8 +5131,7 @@ void screen2_start_button_event_handler(lv_event_t * e) {
         if (sd_logging_initialized && selected_battery_profile != nullptr) {
             if (logChargeStart(&current_charge_log)) {
                 log_num_sdhc = (int32_t)current_charge_log.serial;
-                // Update table display immediately
-                if (data_table != nullptr) {
+                if (TEST_SCREEN && data_table != nullptr) {
                     lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
                 }
             }
@@ -5157,7 +5305,7 @@ void create_screen_1()
 
     // Title
     lv_obj_t *title = lv_label_create(screen_1);
-    lv_label_set_text(title, "GCU 3kW Charger v4.6");
+    lv_label_set_text(title, "GVOLTA 3kW Charger");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
@@ -5185,19 +5333,19 @@ void create_screen_1()
         lv_table_set_col_width(data_table, 3, 198);  // RPM or Power
         lv_table_set_col_width(data_table, 4, 198);  // Log
 
-        // Headers (Row 0) — ENG: Voltage Current Temp (RPM|Power) LOG_num
+        // Headers (Row 0) — ENG: Voltage Current Temp (RPM|Power) (LOG_num|Version)
         lv_table_set_cell_value(data_table, 0, 0, "Voltage");
         lv_table_set_cell_value(data_table, 0, 1, "Current");
         lv_table_set_cell_value(data_table, 0, 2, "Temp");
         lv_table_set_cell_value(data_table, 0, 3, TEST_SCREEN ? "RPM" : "Power");
-        lv_table_set_cell_value(data_table, 0, 4, "LOG_num");
+        lv_table_set_cell_value(data_table, 0, 4, TEST_SCREEN ? "LOG_num" : "Version");
 
         // Values (Row 1)
         lv_table_set_cell_value(data_table, 1, 0, "--");
         lv_table_set_cell_value(data_table, 1, 1, "--");
         lv_table_set_cell_value(data_table, 1, 2, "--");
         lv_table_set_cell_value(data_table, 1, 3, "--");
-        lv_table_set_cell_value(data_table, 1, 4, "-1");
+        lv_table_set_cell_value(data_table, 1, 4, TEST_SCREEN ? "-1" : APP_VERSION_STR);
 
         // Style table - Blue headers, white text
         lv_obj_set_style_bg_color(data_table, lv_color_hex(0x1E88E5), LV_PART_ITEMS);
@@ -5214,15 +5362,14 @@ void create_screen_1()
         lv_obj_set_width(data_table, LV_SIZE_CONTENT);
         lv_obj_set_height(data_table, LV_SIZE_CONTENT);
 
-        // Initialize log_num_sdhc from SD card (latest complete log number)
-        if (sd_logging_initialized) {
+        // Initialize log_num_sdhc from SD card; update col 5 only when TEST_SCREEN (Log number)
+        if (sd_logging_initialized && TEST_SCREEN) {
             uint32_t nextSerial = getNextSerialNumber();
             if (nextSerial > 1) {
                 log_num_sdhc = (int32_t)(nextSerial - 1);  // Latest complete log = next - 1
             } else {
                 log_num_sdhc = -1;  // No logs yet
             }
-            // Update table display with initial value
             lv_table_set_cell_value(data_table, 1, 4, String(log_num_sdhc).c_str());
         }
     }
@@ -5231,9 +5378,9 @@ void create_screen_1()
     lv_obj_set_parent(data_table, screen_1);
     lv_obj_set_pos(data_table, 12, 110);
 
-    // M2 RTC Time label (20px below table)
+    // M2 RTC Time label (20px below table) — date/time only, no prefix
     screen1_rtc_time_label = lv_label_create(screen_1);
-    lv_label_set_text(screen1_rtc_time_label, "M2 rtc time: -- --");
+    lv_label_set_text(screen1_rtc_time_label, "-- --");
     lv_obj_set_style_text_font(screen1_rtc_time_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen1_rtc_time_label, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     //lv_obj_align(screen1_rtc_time_label, LV_ALIGN_TOP_LEFT, 12, 230);  // 20px below table (110 + ~100 table height + 20)
@@ -5298,7 +5445,7 @@ void create_screen_2(void) {
 
     // Title
     lv_obj_t *title = lv_label_create(screen_2);
-    lv_label_set_text(title, "GCU 3kW Charger v4.6");
+    lv_label_set_text(title, "GVOLTA 3kW Charger");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);  // Black text
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, LV_PART_MAIN);  // Use available font
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
@@ -5394,19 +5541,21 @@ void create_screen_2(void) {
     lv_obj_set_style_text_color(screen2_confirm_battery_info_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen2_confirm_battery_info_label, LV_ALIGN_TOP_MID, 0, 55);
 
-    // Target Voltage label - below battery name block
+    // Target Voltage label - below battery name block (blank/hidden when TEST_SCREEN 0)
     screen2_confirm_voltage_label = lv_label_create(screen2_confirm_popup);
-    lv_label_set_text(screen2_confirm_voltage_label, "Target Voltage: -- V");
+    lv_label_set_text(screen2_confirm_voltage_label, TEST_SCREEN ? "Target Voltage: -- V" : "");
     lv_obj_set_style_text_font(screen2_confirm_voltage_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_voltage_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen2_confirm_voltage_label, LV_ALIGN_TOP_MID, 0, 130);
+    if (!TEST_SCREEN) { lv_obj_add_flag(screen2_confirm_voltage_label, LV_OBJ_FLAG_HIDDEN); }
 
-    // Target Current label
+    // Target Current label (blank/hidden when TEST_SCREEN 0)
     screen2_confirm_capacity_label = lv_label_create(screen2_confirm_popup);
-    lv_label_set_text(screen2_confirm_capacity_label, "Target Current: -- A");
+    lv_label_set_text(screen2_confirm_capacity_label, TEST_SCREEN ? "Target Current: -- A" : "");
     lv_obj_set_style_text_font(screen2_confirm_capacity_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen2_confirm_capacity_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_align(screen2_confirm_capacity_label, LV_ALIGN_TOP_MID, 0, 180);
+    if (!TEST_SCREEN) { lv_obj_add_flag(screen2_confirm_capacity_label, LV_OBJ_FLAG_HIDDEN); }
 
     // Current label (unused, hidden)
     screen2_confirm_current_label = lv_label_create(screen2_confirm_popup);
@@ -5488,12 +5637,13 @@ void create_screen_3(void) {
     lv_obj_set_style_text_font(screen3_battery_details_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(screen3_battery_details_label, LV_ALIGN_TOP_LEFT, 12, 230);  // Moved up 30px (300 -> 270)
     
-    // Temperature label (below battery details label)
+    // Temperature label (below battery details label). Hidden when TEST_SCREEN 0.
     screen3_temp_label = lv_label_create(screen_3);
-    lv_label_set_text(screen3_temp_label, "Motor temp : -- , Gcu temp : --");
+    lv_label_set_text(screen3_temp_label, TEST_SCREEN ? "Motor temp : -- , Gvolta temp : --" : "");
     lv_obj_set_style_text_color(screen3_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen3_temp_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(screen3_temp_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Below battery details label
+    if (!TEST_SCREEN) { lv_obj_add_flag(screen3_temp_label, LV_OBJ_FLAG_HIDDEN); }
     
     // Timer table (3x2) for screen 3 - below battery label, left aligned
     screen3_timer_table = lv_table_create(screen_3);
@@ -5508,7 +5658,7 @@ void create_screen_3(void) {
     lv_table_set_cell_value(screen3_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen3_timer_table, 1, 1, "");
     lv_table_set_cell_value(screen3_timer_table, 1, 2, "0.0");
-    lv_obj_set_style_bg_color(screen3_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
+    lv_obj_set_style_bg_color(screen3_timer_table, lv_color_hex(0xFFFFFF), LV_PART_ITEMS);  // White
     lv_obj_set_style_border_color(screen3_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen3_timer_table, 3, LV_PART_ITEMS);  // Thick black border
     lv_obj_set_style_text_font(screen3_timer_table, &lv_font_montserrat_28, LV_PART_ITEMS);
@@ -5574,11 +5724,12 @@ void create_screen_4(void) {
     
     // Temperature label (below battery details label)
     screen4_temp_label = lv_label_create(screen_4);
-    lv_label_set_text(screen4_temp_label, "Motor temp : -- , Gcu temp : --");
+    lv_label_set_text(screen4_temp_label, TEST_SCREEN ? "Motor temp : -- , Gvolta temp : --" : "");
     lv_obj_set_style_text_color(screen4_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen4_temp_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(screen4_temp_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Below battery details label
-    
+    if (!TEST_SCREEN) { lv_obj_add_flag(screen4_temp_label, LV_OBJ_FLAG_HIDDEN); }
+
     // Timer table (3x2) for screen 4 - below battery label, left aligned
     screen4_timer_table = lv_table_create(screen_4);
     lv_table_set_col_cnt(screen4_timer_table, 3);
@@ -5592,7 +5743,7 @@ void create_screen_4(void) {
     lv_table_set_cell_value(screen4_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen4_timer_table, 1, 1, "");
     lv_table_set_cell_value(screen4_timer_table, 1, 2, "0.0");
-    lv_obj_set_style_bg_color(screen4_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
+    lv_obj_set_style_bg_color(screen4_timer_table, lv_color_hex(0xFFFFFF), LV_PART_ITEMS);  // White
     lv_obj_set_style_border_color(screen4_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen4_timer_table, 3, LV_PART_ITEMS);  // Thick black border
     lv_obj_set_style_text_font(screen4_timer_table, &lv_font_montserrat_28, LV_PART_ITEMS);
@@ -5657,11 +5808,12 @@ void create_screen_5(void) {
     
     // Temperature label (below battery details label)
     screen5_temp_label = lv_label_create(screen_5);
-    lv_label_set_text(screen5_temp_label, "Motor temp : -- , Gcu temp : --");
+    lv_label_set_text(screen5_temp_label, TEST_SCREEN ? "Motor temp : -- , Gvolta temp : --" : "");
     lv_obj_set_style_text_color(screen5_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen5_temp_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(screen5_temp_label, LV_ALIGN_TOP_LEFT, 12, 270);  // Below battery details label
-    
+    if (!TEST_SCREEN) { lv_obj_add_flag(screen5_temp_label, LV_OBJ_FLAG_HIDDEN); }
+
     // Timer table (3x2) for screen 5 - shows total time, remaining time, and Ah, below battery label, left aligned
     screen5_timer_table = lv_table_create(screen_5);
     lv_table_set_col_cnt(screen5_timer_table, 3);
@@ -5675,7 +5827,7 @@ void create_screen_5(void) {
     lv_table_set_cell_value(screen5_timer_table, 1, 0, "00:00:00");
     lv_table_set_cell_value(screen5_timer_table, 1, 1, "00:00");
     lv_table_set_cell_value(screen5_timer_table, 1, 2, "0.0");
-    lv_obj_set_style_bg_color(screen5_timer_table, lv_color_hex(0xDDA0DD), LV_PART_ITEMS);  // Light purple
+    lv_obj_set_style_bg_color(screen5_timer_table, lv_color_hex(0xFFFFFF), LV_PART_ITEMS);  // White
     lv_obj_set_style_border_color(screen5_timer_table, lv_color_hex(0x000000), LV_PART_ITEMS);  // Black border
     lv_obj_set_style_border_width(screen5_timer_table, 3, LV_PART_ITEMS);  // Thick black border
     lv_obj_set_style_text_font(screen5_timer_table, &lv_font_montserrat_28, LV_PART_ITEMS);
@@ -5775,16 +5927,16 @@ void create_screen_6(void) {
 
     // Create remove battery popup for screen 6
     screen6_remove_battery_popup = lv_obj_create(screen_6);
-    lv_obj_set_size(screen6_remove_battery_popup, 700, 300);
+    lv_obj_set_size(screen6_remove_battery_popup, 800, 300);
     lv_obj_center(screen6_remove_battery_popup);
     lv_obj_set_style_bg_color(screen6_remove_battery_popup, lv_color_hex(0xFFE4B5), LV_PART_MAIN);  // Moccasin background
     lv_obj_set_style_border_width(screen6_remove_battery_popup, 4, LV_PART_MAIN);
     lv_obj_set_style_border_color(screen6_remove_battery_popup, lv_color_hex(0xFF6600), LV_PART_MAIN);  // Orange border
     lv_obj_set_style_radius(screen6_remove_battery_popup, 15, LV_PART_MAIN);
     lv_obj_add_flag(screen6_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
-    
+
     screen6_remove_battery_label = lv_label_create(screen6_remove_battery_popup);
-    lv_label_set_text(screen6_remove_battery_label, "Please remove the battery \nbefore returning to home..");
+    lv_label_set_text(screen6_remove_battery_label, "Disconnect the battery from the connector to return to the home screen.");
     lv_obj_set_style_text_font(screen6_remove_battery_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen6_remove_battery_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red text
     lv_obj_set_style_text_align(screen6_remove_battery_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
@@ -5868,16 +6020,16 @@ void create_screen_7(void) {
 
     // Create remove battery popup for screen 7
     screen7_remove_battery_popup = lv_obj_create(screen_7);
-    lv_obj_set_size(screen7_remove_battery_popup, 700, 300);
+    lv_obj_set_size(screen7_remove_battery_popup, 800, 300);
     lv_obj_center(screen7_remove_battery_popup);
     lv_obj_set_style_bg_color(screen7_remove_battery_popup, lv_color_hex(0xFFE4B5), LV_PART_MAIN);  // Moccasin background
     lv_obj_set_style_border_width(screen7_remove_battery_popup, 4, LV_PART_MAIN);
     lv_obj_set_style_border_color(screen7_remove_battery_popup, lv_color_hex(0xFF6600), LV_PART_MAIN);  // Orange border
     lv_obj_set_style_radius(screen7_remove_battery_popup, 15, LV_PART_MAIN);
     lv_obj_add_flag(screen7_remove_battery_popup, LV_OBJ_FLAG_HIDDEN);  // Hidden by default
-    
+
     screen7_remove_battery_label = lv_label_create(screen7_remove_battery_popup);
-    lv_label_set_text(screen7_remove_battery_label, "Please remove the battery \nbefore returning to home..");
+    lv_label_set_text(screen7_remove_battery_label, "Disconnect the battery from the connector to return to the home screen.");
     lv_obj_set_style_text_font(screen7_remove_battery_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen7_remove_battery_label, lv_color_hex(0xFF0000), LV_PART_MAIN);  // Red text
     lv_obj_set_style_text_align(screen7_remove_battery_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
@@ -5926,11 +6078,12 @@ void create_screen_8(void) {
     
     // Temperature label (below battery details, same position and size as screens 3,4,5)
     screen8_temp_label = lv_label_create(screen_8);
-    lv_label_set_text(screen8_temp_label, "Motor temp : -- , Gcu temp : --");
+    lv_label_set_text(screen8_temp_label, TEST_SCREEN ? "Motor temp : -- , Gvolta temp : --" : "");
     lv_obj_set_style_text_color(screen8_temp_label, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(screen8_temp_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_align(screen8_temp_label, LV_ALIGN_TOP_LEFT, 12, 270);
-    
+    if (!TEST_SCREEN) { lv_obj_add_flag(screen8_temp_label, LV_OBJ_FLAG_HIDDEN); }
+
     // Timer table (3x2) for screen 8 - below temp label, same position as screens 3,4,5
     screen8_timer_table = lv_table_create(screen_8);
     lv_table_set_col_cnt(screen8_timer_table, 3);
@@ -6092,19 +6245,19 @@ void create_screen_18(void) {
 
     // Labels above table (table at y=110, ~100px tall)
     lv_obj_t* title = lv_label_create(screen_18);
-    lv_label_set_text(title, "Connection failed or lost with M2 V4.6"); //update ver number here too
+    lv_label_set_text(title, "Connection failed or lost with M2");
     lv_obj_set_style_text_color(title, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
 
     lv_obj_t* msg = lv_label_create(screen_18);
-    lv_label_set_text(msg, "Contactor open, motor stopped.");
+    lv_label_set_text(msg, "Please restart the device.");
     lv_obj_set_style_text_color(msg, lv_color_hex(0x8B0000), LV_PART_MAIN);
     lv_obj_set_style_text_font(msg, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 235);
 
     lv_obj_t* msg2 = lv_label_create(screen_18);
-    lv_label_set_text(msg2, "Check with M2 and Restart device.");
+    lv_label_set_text(msg2, "If the problem persists, contact GVOLTA.");
     lv_obj_set_style_text_color(msg2, lv_color_hex(0x8B0000), LV_PART_MAIN);
     lv_obj_set_style_text_font(msg2, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_align(msg2, LV_ALIGN_TOP_MID, 0, 280);
@@ -6117,7 +6270,7 @@ void create_screen_18(void) {
 
     // M2 RTC time label 20px below table (same position and style as screen 1)
     screen18_rtc_time_label = lv_label_create(screen_18);
-    lv_label_set_text(screen18_rtc_time_label, "M2 rtc time: -- --");
+    lv_label_set_text(screen18_rtc_time_label, "-- --");
     lv_obj_set_style_text_font(screen18_rtc_time_label, &lv_font_montserrat_30, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen18_rtc_time_label, lv_color_hex(0x000000), LV_PART_MAIN);
     //lv_obj_align(screen18_rtc_time_label, LV_ALIGN_TOP_LEFT, 12, 330);  // 20px below table (110 + ~100 + 20)

@@ -1,0 +1,121 @@
+================================================================================
+                    IVCC TOUCH5 UI — USER MANUAL HELPER
+                    (Use this outline to build the manual in Word)
+================================================================================
+
+
+1. INTRODUCTION / OVERVIEW
+-------------------------
+Brief description of the IVCC Touch5 system: in-vehicle battery charging controller with touchscreen. Main purpose: monitor and control battery charging (CC/CV), view voltage/current/temperature, and manage charge sessions. Supported battery types: Lithium, Lead Acid, LiFePO4; various voltages and capacities.
+
+
+[Image 1: manual_01_overview_home_screen]
+
+
+2. HOME SCREEN (Screen 1)
+-------------------------
+Default screen when no battery is connected or no charge in progress. Shows system ready state. User can see date/time if RTC/M2 is connected. From here the system transitions to “Battery detected” when a battery is connected.
+
+
+[Image 2: manual_02_home_screen]
+
+
+3. BATTERY DETECTED / CHARGE READY (Screen 2)
+---------------------------------------------
+Displayed when a battery is detected and charging can start. Shows battery information (type, voltage, capacity). User can select a battery profile if multiple are available, then tap to start charging. Buttons: Start Charge (and optionally battery list / selection).
+
+
+[Image 3: manual_03_battery_detected_screen]
+
+
+4. CHARGING START — WAITING FOR CURRENT (Screen 3)
+--------------------------------------------------
+Shown when charge has been started but current has not yet reached the threshold (e.g. 1 A). Precharge phase. User should wait; do not disconnect. Screen shows progress and may show voltage/current. If current does not flow within the allowed time, the system may show an error (volt/current or precharge).
+
+
+[Image 4: manual_04_charging_start_screen]
+
+
+5. CONSTANT CURRENT MODE — CC (Screen 4)
+-----------------------------------------
+Charging in constant-current phase. Screen shows voltage, current, temperature, and optionally RPM or power. Timer shows elapsed charge time and/or remaining time. This is the main charging phase until voltage reaches the cutoff and the system switches to CV.
+
+
+[Image 5: manual_05_cc_mode_screen]
+
+
+6. CONSTANT VOLTAGE MODE — CV (Screen 5)
+-----------------------------------------
+Charging in constant-voltage phase. Current tapers as the battery fills. Same key readings: voltage, current, temperature, time. Charge continues until completion, voltage saturation, or another stop condition.
+
+
+[Image 6: manual_06_cv_mode_screen]
+
+
+7. CHARGING COMPLETE (Screen 6)
+-------------------------------
+Shown when charging has finished normally (or stopped for another reason, e.g. 110% capacity, user stop). Displays final status, total charge time, and reason for stop. User can return to home or start a new charge from the battery-detected screen.
+
+
+[Image 7: manual_07_charging_complete_screen]
+
+
+8. EMERGENCY STOP (Screen 7)
+-----------------------------
+Shown when the user triggers emergency stop or when the system stops for safety (e.g. high temperature). Explains that charging has been stopped for safety. User should check connections and conditions before starting again.
+
+
+[Image 8: manual_08_emergency_stop_screen]
+
+
+9. VOLTAGE SATURATION (Screen 8)
+---------------------------------
+Shown when voltage saturation is detected during CV (battery fully charged at set voltage). Charge is stopped to protect the battery. User can note the completion and return to home or disconnect.
+
+
+[Image 9: manual_09_voltage_saturation_screen]
+
+
+10. BATTERY PROFILES AND SETTINGS
+---------------------------------
+Short explanation of battery types (Lithium, Lead Acid, LiFePO4), rated voltage, capacity (Ah), cutoff voltage, and charging current. How to select a profile when multiple are available (if applicable). Mention that profiles can be pre-configured (e.g. 12V, 24V, 48V, etc.).
+
+
+[Image 10: manual_10_battery_profiles_screen]
+
+
+11. SD CARD LOGGING (if applicable)
+-----------------------------------
+If the product logs to SD: what is logged (e.g. voltage, current, temperature, timestamps), how to ensure an SD card is inserted, and that logs can be used for analysis or diagnostics. Keep to 1–2 sentences if the feature is optional.
+
+
+[Image 11: manual_11_sd_logging_screen]
+
+
+12. M2 CONNECTION LOST (Screen 18)
+----------------------------------
+Shown when communication with the M2 unit is lost. User may see a message that the connection failed or was lost. Restart or check wiring/connection as per product instructions. No navigation away until the issue is resolved.
+
+
+[Image 12: manual_12_m2_lost_screen]
+
+
+13. SAFETY AND WARNINGS
+-----------------------
+Brief safety notes: only use with intended battery types and voltages; do not bypass safety stops; ensure ventilation and temperature limits; emergency stop usage; and whom to contact for support or service.
+
+
+[Image 13: manual_13_safety_warnings]
+
+
+14. TROUBLESHOOTING (SHORT)
+---------------------------
+One or two lines per case: no current during start (check connections, precharge); high temperature (cool down, check load); charge stops early (check profile and limits); screen not responding (restart device). Reference the relevant screen numbers above where useful.
+
+
+[Image 14: manual_14_troubleshooting]
+
+
+================================================================================
+END OF USER MANUAL HELPER — Append screenshots to the image placeholders above
+================================================================================
